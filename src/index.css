@@ -1,0 +1,199 @@
+@import "katex/dist/katex.min.css";
+
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 221.2 83% 53%; /* Beautiful blue */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 47.9 95.8% 51.2%; /* Gamified yellow */
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 1rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 6%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 84% 4.9%;
+
+    --secondary: 47.9 95.8% 51.2%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground transition-colors duration-300 antialiased;
+    font-family: 'Outfit', 'Inter', sans-serif;
+  }
+}
+
+/* Custom premium design system utility classes */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.dark .glass-panel {
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bg-mesh {
+  background-color: #f8fafc;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(221, 83%, 53%, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(47, 95%, 51%, 0.06) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, hsla(221, 83%, 53%, 0.03) 0px, transparent 50%);
+}
+
+.dark .bg-mesh {
+  background-color: #0b0f19;
+  background-image: 
+    radial-gradient(at 0% 0%, hsla(217, 91%, 60%, 0.12) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(47, 95%, 51%, 0.1) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, hsla(222, 84%, 4%, 0.12) 0px, transparent 50%);
+}
+
+/* Kahoot-like shape options for responses */
+.option-button-red {
+  background: linear-gradient(135deg, #e21b3c 0%, #bd122b 100%);
+  box-shadow: 0 4px 0 #860c1d;
+}
+.option-button-blue {
+  background: linear-gradient(135deg, #1368ce 0%, #0c4e9e 100%);
+  box-shadow: 0 4px 0 #07346b;
+}
+.option-button-yellow {
+  background: linear-gradient(135deg, #d89e00 0%, #b08000 100%);
+  box-shadow: 0 4px 0 #795800;
+}
+.option-button-green {
+  background: linear-gradient(135deg, #26890c 0%, #1c6507 100%);
+  box-shadow: 0 4px 0 #103e03;
+}
+
+.option-button-red:active, .option-button-blue:active, .option-button-yellow:active, .option-button-green:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 transparent;
+}
+
+/* Quiz progress bar */
+@keyframes shrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+.quiz-timer-bar {
+  animation: shrink linear forwards;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/30;
+}
+
+/* SweetAlert2 Premium Theming */
+.swal2-popup.swal-premium-popup {
+  border-radius: 1.5rem !important;
+  font-family: 'Outfit', 'Inter', sans-serif !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+
+/* Light mode override for SweetAlert */
+:root:not(.dark) .swal2-popup.swal-premium-popup,
+body:not(.dark) .swal2-popup.swal-premium-popup {
+  background: rgba(255, 255, 255, 0.95) !important;
+  color: #1f2937 !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.swal-premium-title {
+  font-weight: 800 !important;
+  font-size: 1.5rem !important;
+}
+
+.swal-premium-text {
+  font-size: 0.95rem !important;
+  font-weight: 500 !important;
+}
+
+:root:not(.dark) .swal-premium-text {
+  color: #4b5563 !important;
+}
+
+.swal-premium-btn {
+  border-radius: 1rem !important;
+  font-weight: 700 !important;
+  padding: 0.75rem 1.5rem !important;
+  font-size: 0.875rem !important;
+  transition: all 0.2s !important;
+}
+
+.swal-premium-btn:hover {
+  transform: translateY(-1px) !important;
+}
+
