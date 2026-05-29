@@ -34,4 +34,4 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./dist/
-          server-dir: ./  # Mengunggah langsung ke root direktori FTP (sinesa-sdn012bakcip.com)
+          server-dir: /sinesa-sdn012bakcip.com/  # Mengunggah ke folder domain di bawah root akun cPanel utama
