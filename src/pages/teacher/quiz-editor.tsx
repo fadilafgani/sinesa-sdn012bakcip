@@ -756,6 +756,7 @@ export const QuizEditor: React.FC = () => {
                       className="hidden"
                     />
                   </label>
+                  <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
                 </div>
               </div>
 
@@ -1271,6 +1272,7 @@ export const QuizEditor: React.FC = () => {
                           className="hidden"
                         />
                       </label>
+                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
                     </div>
                     <div className="flex items-center justify-center border-l pl-4">
                       {currentWatchedQuestion?.media_url ? (
@@ -1306,6 +1308,7 @@ export const QuizEditor: React.FC = () => {
                           className="hidden"
                         />
                       </label>
+                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
                     </div>
                     <div className="flex flex-col justify-center border-l pl-4">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase">Pemutar Audio</span>
