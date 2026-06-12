@@ -309,6 +309,14 @@ export const QuizEditor: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Limit file size to 5 MB (5 * 1024 * 1024 bytes)
+    const MAX_FILE_SIZE = 5 * 1024 * 1024;
+    if (file.size > MAX_FILE_SIZE) {
+      showError('Ukuran File Terlalu Besar', 'Maksimal ukuran file yang diunggah adalah 5 MB.');
+      e.target.value = ''; // Reset file input
+      return;
+    }
+
     if (isMock) {
       // Mock File Upload: read as base64 string
       const reader = new FileReader();
