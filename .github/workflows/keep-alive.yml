@@ -1,0 +1,33 @@
+name: Supabase Keep Alive
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *'  # Berjalan setiap 3 hari sekali pada jam 00:00 UTC
+  workflow_dispatch:      # Mengizinkan pemicuan manual dari tab Actions di GitHub
+
+jobs:
+  ping:
+    name: 💓 Ping Supabase Database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send API request to Supabase
+        run: |
+          if [ -z "${{ secrets.VITE_SUPABASE_URL }}" ] || [ -z "${{ secrets.VITE_SUPABASE_ANON_KEY }}" ]; then
+            echo "Error: Kredensial Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) belum diset di GitHub Secrets!"
+            exit 1
+          fi
+          
+          echo "Mengirimkan query request ke REST API Supabase..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X GET "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/quizzes?limit=1" \
+            -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}")
+          
+          echo "Supabase merespon dengan kode HTTP: $response"
+          
+          if [ "$response" -ge 200 ] && [ "$response" -lt 400 ]; then
+            echo "Sukses: Supabase keep-alive ping berhasil diselesaikan!"
+          else
+            echo "Error: Mendapatkan respon kode HTTP $response. Silakan periksa apakah project Supabase aktif atau kredensial benar."
+            exit 1
+          fi
