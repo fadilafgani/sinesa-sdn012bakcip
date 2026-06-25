@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LatexRenderer } from '../../components/latex-renderer';
+import { LazyImage } from '../../components/lazy-image';
 
 export const StudentDashboard: React.FC = () => {
   const { profile, signOut, isMock } = useAuthStore();
@@ -735,7 +736,7 @@ export const StudentDashboard: React.FC = () => {
                                         }}
                                         className="relative group cursor-zoom-in overflow-hidden rounded-xl max-w-xs border border-border/50"
                                       >
-                                        <img 
+                                        <LazyImage 
                                           src={q.media_url} 
                                           alt={`Media soal ${qIdx + 1}`}
                                           className="max-h-40 w-auto object-cover group-hover:scale-[1.02] transition duration-200"
@@ -743,6 +744,14 @@ export const StudentDashboard: React.FC = () => {
                                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition duration-200">
                                           <ZoomIn className="h-6 w-6 text-white" />
                                         </div>
+                                      </div>
+                                    ) : q.media_type === 'audio' ? (
+                                      <div className="max-w-xs">
+                                        <audio controls src={q.media_url} className="w-full scale-90 origin-left" />
+                                      </div>
+                                    ) : q.media_type === 'video' ? (
+                                      <div className="max-w-xs overflow-hidden rounded-xl border">
+                                        <video controls src={q.media_url} className="max-h-40 w-full bg-black" />
                                       </div>
                                     ) : q.media_type === 'latex' ? (
                                       <div className="p-3 bg-card rounded-xl border border-border">

@@ -71,7 +71,7 @@ export const Analytics: React.FC = () => {
 
   useEffect(() => {
     const loadAnalyticsData = async () => {
-      if (!quizId) return;
+      if (!quizId || !profile?.id) return;
       setLoading(true);
 
       if (isMock) {
@@ -186,7 +186,7 @@ export const Analytics: React.FC = () => {
     };
 
     loadAnalyticsData();
-  }, [quizId]);
+  }, [quizId, profile?.id]);
 
   const handleExportCSV = () => {
     if (!quiz) return;

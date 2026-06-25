@@ -8,11 +8,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { 
   ArrowLeft, Plus, Trash2, Save, Image, Volume2, Type, Sigma, 
-  UploadCloud, ChevronRight, CheckCircle2, Play 
+  UploadCloud, ChevronRight, CheckCircle2, Play, Video
 } from 'lucide-react';
 import { LatexRenderer } from '../../components/latex-renderer';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showError } from '../../lib/swal';
+import { mediaStorageService } from '../../services/media-storage';
+import { LazyImage } from '../../components/lazy-image';
 
 // Validation Schema using Zod
 const optionSchema = z.object({
@@ -26,7 +28,7 @@ const questionSchema = z.object({
   id: z.string().optional(),
   question_text: z.string().min(3, 'Pertanyaan minimal harus 3 karakter'),
   question_type: z.enum(['multiple_choice', 'true_false', 'multiple_answer', 'matching']).default('multiple_choice'),
-  media_type: z.enum(['text', 'image', 'audio', 'latex']),
+  media_type: z.enum(['text', 'image', 'audio', 'video', 'latex']),
   media_url: z.string().nullable().optional(),
   points: z.coerce.number().min(10).max(10000).default(100),
   explanation: z.string().optional().nullable(),
@@ -93,6 +95,8 @@ export const QuizEditor: React.FC = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadingType, setUploadingType] = useState<string | null>(null);
 
   // Form setup
   const { register, control, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<any>({
@@ -304,15 +308,38 @@ export const QuizEditor: React.FC = () => {
     loadQuizData();
   }, [quizId, isNew, reset]);
 
-  // File Upload to Base64 (Local fallback) or Supabase Storage
+  // File Upload using mediaStorageService (Server Upload)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'thumbnail' | 'media', qIndex?: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Limit file size to 5 MB (5 * 1024 * 1024 bytes)
-    const MAX_FILE_SIZE = 5 * 1024 * 1024;
-    if (file.size > MAX_FILE_SIZE) {
-      showError('Ukuran File Terlalu Besar', 'Maksimal ukuran file yang diunggah adalah 5 MB.');
+    // Determine type, constraints & bucket folders
+    let uploadType: 'thumbnails' | 'quiz-images' | 'quiz-audio' | 'quiz-videos' = 'quiz-images';
+    let maxLimit = 2 * 1024 * 1024;
+    let limitLabel = '2 MB';
+
+    if (type === 'thumbnail') {
+      uploadType = 'thumbnails';
+      maxLimit = 2 * 1024 * 1024;
+      limitLabel = '2 MB';
+    } else {
+      if (file.type.startsWith('audio/')) {
+        uploadType = 'quiz-audio';
+        maxLimit = 10 * 1024 * 1024;
+        limitLabel = '10 MB';
+      } else if (file.type.startsWith('video/')) {
+        uploadType = 'quiz-videos';
+        maxLimit = 50 * 1024 * 1024;
+        limitLabel = '50 MB';
+      } else {
+        uploadType = 'quiz-images';
+        maxLimit = 2 * 1024 * 1024;
+        limitLabel = '2 MB';
+      }
+    }
+
+    if (file.size > maxLimit) {
+      showError('Ukuran Berkas Terlalu Besar', `Maksimal ukuran berkas yang diunggah untuk tipe ini adalah ${limitLabel}.`);
       e.target.value = ''; // Reset file input
       return;
     }
@@ -332,34 +359,39 @@ export const QuizEditor: React.FC = () => {
       return;
     }
 
-    // Online Upload via Supabase Storage
+    // Set uploading states
+    const identifier = type === 'thumbnail' ? 'thumbnail' : `media-${qIndex}`;
+    setUploadingType(identifier);
+    setUploadProgress(0);
+    setLoading(true);
+
     try {
-      setLoading(true);
-      const bucketName = type === 'thumbnail' ? 'quiz-thumbnails' : 
-                          file.type.startsWith('audio/') ? 'question-audios' : 'question-images';
-      
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `${fileName}`;
+      // Fetch old URL if exists, to replace it on the server
+      const oldUrl = type === 'thumbnail' 
+        ? watch('thumbnail_url') 
+        : (qIndex !== undefined ? watch(`questions.${qIndex}.media_url`) : '');
 
-      const { error: uploadError } = await supabase.storage
-        .from(bucketName)
-        .upload(filePath, file);
+      const result = await mediaStorageService.replace(file, oldUrl || '', {
+        type: uploadType,
+        onProgress: (p) => setUploadProgress(p)
+      });
 
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage.from(bucketName).getPublicUrl(filePath);
+      if (!result.success) {
+        throw new Error(result.message || 'Gagal mengunggah berkas ke server.');
+      }
 
       if (type === 'thumbnail') {
-        setValue('thumbnail_url', data.publicUrl);
+        setValue('thumbnail_url', result.url);
       } else if (type === 'media' && qIndex !== undefined) {
-        setValue(`questions.${qIndex}.media_url`, data.publicUrl);
+        setValue(`questions.${qIndex}.media_url`, result.url);
       }
     } catch (err: any) {
       console.error('Upload error:', err);
-      showError('Gagal', `Gagal upload file: ${err.message}`);
+      showError('Gagal', `Gagal mengunggah file ke server: ${err.message}`);
     } finally {
       setLoading(false);
+      setUploadingType(null);
+      setUploadProgress(null);
     }
   };
 
@@ -746,23 +778,32 @@ export const QuizEditor: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-muted-foreground uppercase">Thumbnail Kuis</label>
-                  <label className="w-full mt-1 flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2.5 text-xs text-muted-foreground font-semibold">
-                    <UploadCloud className="h-4 w-4" />
-                    Upload
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => handleFileUpload(e, 'thumbnail')}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
+                  {uploadingType === 'thumbnail' ? (
+                    <div className="w-full mt-1 flex flex-col items-center justify-center border rounded-xl py-2 px-3 text-[10px]">
+                      <span className="font-bold text-primary mb-1">Mengunggah... {uploadProgress}%</span>
+                      <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                        <div className="bg-primary h-full transition-all duration-150" style={{ width: `${uploadProgress}%` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="w-full mt-1 flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2.5 text-xs text-muted-foreground font-semibold">
+                      <UploadCloud className="h-4 w-4" />
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={e => handleFileUpload(e, 'thumbnail')}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                  <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 2 MB</p>
                 </div>
               </div>
 
               {watch('thumbnail_url') && (
                 <div className="rounded-xl overflow-hidden h-24 border">
-                  <img src={watch('thumbnail_url')!} alt="Thumbnail preview" className="w-full h-full object-cover" />
+                  <LazyImage src={watch('thumbnail_url')!} alt="Thumbnail preview" className="w-full h-full object-cover" />
                 </div>
               )}
 
@@ -1120,7 +1161,7 @@ export const QuizEditor: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1 block">Tipe Soal / Media</label>
-                    <div className="grid grid-cols-4 gap-2">
+                    <div className="grid grid-cols-5 gap-1.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -1129,7 +1170,7 @@ export const QuizEditor: React.FC = () => {
                             setValue(`questions.${activeQuestionIndex}.media_url`, '');
                           }
                         }}
-                        className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition ${
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
                           currentWatchedQuestion?.media_type === 'text'
                             ? 'border-primary bg-primary/10 text-primary'
                             : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
@@ -1146,7 +1187,7 @@ export const QuizEditor: React.FC = () => {
                             setValue(`questions.${activeQuestionIndex}.media_url`, '');
                           }
                         }}
-                        className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition ${
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
                           currentWatchedQuestion?.media_type === 'image'
                             ? 'border-primary bg-primary/10 text-primary'
                             : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
@@ -1163,7 +1204,7 @@ export const QuizEditor: React.FC = () => {
                             setValue(`questions.${activeQuestionIndex}.media_url`, '');
                           }
                         }}
-                        className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition ${
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
                           currentWatchedQuestion?.media_type === 'audio'
                             ? 'border-primary bg-primary/10 text-primary'
                             : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
@@ -1175,12 +1216,29 @@ export const QuizEditor: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          if (currentWatchedQuestion?.media_type !== 'video') {
+                            setValue(`questions.${activeQuestionIndex}.media_type`, 'video');
+                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                          }
+                        }}
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                          currentWatchedQuestion?.media_type === 'video'
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                        }`}
+                      >
+                        <Video className="h-4 w-4 mb-1" />
+                        Video
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
                           if (currentWatchedQuestion?.media_type !== 'latex') {
                             setValue(`questions.${activeQuestionIndex}.media_type`, 'latex');
                             setValue(`questions.${activeQuestionIndex}.media_url`, '');
                           }
                         }}
-                        className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition ${
+                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
                           currentWatchedQuestion?.media_type === 'latex'
                             ? 'border-primary bg-primary/10 text-primary'
                             : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
@@ -1262,21 +1320,30 @@ export const QuizEditor: React.FC = () => {
                         placeholder="https://link-gambar.com/soal.jpg"
                         className="w-full mt-1 rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary mb-2"
                       />
-                      <label className="w-full flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2 text-xs text-muted-foreground font-semibold">
-                        <UploadCloud className="h-4 w-4" />
-                        Unggah File Gambar
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={e => handleFileUpload(e, 'media', activeQuestionIndex)}
-                          className="hidden"
-                        />
-                      </label>
-                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
+                      {uploadingType === `media-${activeQuestionIndex}` ? (
+                        <div className="w-full flex flex-col items-center justify-center border rounded-xl py-2 px-3 text-[10px] bg-background">
+                          <span className="font-bold text-primary mb-1">Mengunggah Gambar... {uploadProgress}%</span>
+                          <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                            <div className="bg-primary h-full transition-all duration-150" style={{ width: `${uploadProgress}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2 text-xs text-muted-foreground font-semibold">
+                          <UploadCloud className="h-4 w-4" />
+                          Unggah File Gambar
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => handleFileUpload(e, 'media', activeQuestionIndex)}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 2 MB</p>
                     </div>
                     <div className="flex items-center justify-center border-l pl-4">
                       {currentWatchedQuestion?.media_url ? (
-                        <img
+                        <LazyImage
                           src={currentWatchedQuestion.media_url}
                           alt="Soal preview"
                           className="h-28 max-w-full object-contain rounded-xl border bg-background"
@@ -1298,17 +1365,26 @@ export const QuizEditor: React.FC = () => {
                         placeholder="https://link-audio.com/lagu.mp3"
                         className="w-full mt-1 rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary mb-2"
                       />
-                      <label className="w-full flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2 text-xs text-muted-foreground font-semibold">
-                        <UploadCloud className="h-4 w-4" />
-                        Unggah File Audio
-                        <input
-                          type="file"
-                          accept="audio/*"
-                          onChange={e => handleFileUpload(e, 'media', activeQuestionIndex)}
-                          className="hidden"
-                        />
-                      </label>
-                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 5 MB</p>
+                      {uploadingType === `media-${activeQuestionIndex}` ? (
+                        <div className="w-full flex flex-col items-center justify-center border rounded-xl py-2 px-3 text-[10px] bg-background">
+                          <span className="font-bold text-primary mb-1">Mengunggah Audio... {uploadProgress}%</span>
+                          <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                            <div className="bg-primary h-full transition-all duration-150" style={{ width: `${uploadProgress}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2 text-xs text-muted-foreground font-semibold">
+                          <UploadCloud className="h-4 w-4" />
+                          Unggah File Audio
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            onChange={e => handleFileUpload(e, 'media', activeQuestionIndex)}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 10 MB</p>
                     </div>
                     <div className="flex flex-col justify-center border-l pl-4">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase">Pemutar Audio</span>
@@ -1316,6 +1392,48 @@ export const QuizEditor: React.FC = () => {
                         <audio controls src={currentWatchedQuestion.media_url} className="mt-2 w-full max-h-10" />
                       ) : (
                         <span className="text-xs text-muted-foreground italic mt-2">Audio belum diupload</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {currentWatchedQuestion?.media_type === 'video' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border p-4 rounded-2xl bg-muted/20">
+                    <div>
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase">File Video / URL</label>
+                      <input
+                        type="text"
+                        {...register(`questions.${activeQuestionIndex}.media_url`)}
+                        placeholder="https://link-video.com/soal.mp4"
+                        className="w-full mt-1 rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none focus:border-primary mb-2"
+                      />
+                      {uploadingType === `media-${activeQuestionIndex}` ? (
+                        <div className="w-full flex flex-col items-center justify-center border rounded-xl py-2 px-3 text-[10px] bg-background">
+                          <span className="font-bold text-primary mb-1">Mengunggah Video... {uploadProgress}%</span>
+                          <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                            <div className="bg-primary h-full transition-all duration-150" style={{ width: `${uploadProgress}%` }} />
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full flex items-center justify-center gap-1.5 border border-dashed rounded-xl cursor-pointer hover:bg-muted py-2 text-xs text-muted-foreground font-semibold">
+                          <UploadCloud className="h-4 w-4" />
+                          Unggah File Video
+                          <input
+                            type="file"
+                            accept="video/*"
+                            onChange={e => handleFileUpload(e, 'media', activeQuestionIndex)}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                      <p className="text-[10px] text-muted-foreground mt-1 font-medium">Maksimal ukuran file: 50 MB</p>
+                    </div>
+                    <div className="flex flex-col justify-center border-l pl-4">
+                      <span className="text-[10px] font-bold text-muted-foreground uppercase">Pemutar Video</span>
+                      {currentWatchedQuestion?.media_url ? (
+                        <video controls src={currentWatchedQuestion.media_url} className="mt-2 w-full max-h-32 rounded-xl border bg-background" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic mt-2">Video belum diupload</span>
                       )}
                     </div>
                   </div>

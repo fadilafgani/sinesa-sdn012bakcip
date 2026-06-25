@@ -649,33 +649,45 @@ export const usePlayStore = create<PlayState>((set, get) => {
           (!previousSess || 
            previousSess.current_question_index !== updatedSess.current_question_index ||
            get().currentQuestion === null)) {
-        
-        const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-        const { data: questions } = await supabase
-          .from('questions')
-          .select('*')
-          .eq('quiz_id', updatedSess.quiz_id)
-          .neq('id', cacheBusterQs)
-          .order('order_index', { ascending: true });
+         
+         try {
+           let questions = get().questions;
+           if (!questions || questions.length === 0) {
+             const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+             const { data: questionsData, error: qsErr } = await supabase
+               .from('questions')
+               .select('*')
+               .eq('quiz_id', updatedSess.quiz_id)
+               .neq('id', cacheBusterQs)
+               .order('order_index', { ascending: true });
+             if (qsErr) throw qsErr;
+             questions = (questionsData as Question[]) || [];
+             set({ questions });
+           }
 
-        if (questions && questions[updatedSess.current_question_index]) {
-          const nextQuestion = questions[updatedSess.current_question_index] as Question;
+           if (questions && questions[updatedSess.current_question_index]) {
+             const nextQuestion = questions[updatedSess.current_question_index] as Question;
 
-          const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-          const { data: options } = await supabase
-            .from('options')
-            .select('*')
-            .eq('question_id', nextQuestion.id)
-            .neq('id', cacheBusterOpts);
+             const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+             const { data: options, error: optsErr } = await supabase
+               .from('options')
+               .select('*')
+               .eq('question_id', nextQuestion.id)
+               .neq('id', cacheBusterOpts);
+             if (optsErr) throw optsErr;
 
-          set({
-            currentQuestion: nextQuestion,
-            currentOptions: (options as Option[]) || [],
-            hasAnswered: false,
-            isAnswerCorrect: null,
-            scoreAwarded: 0,
-          });
-        }
+             set({
+               currentQuestionIndex: updatedSess.current_question_index,
+               currentQuestion: nextQuestion,
+               currentOptions: (options as Option[]) || [],
+               hasAnswered: false,
+               isAnswerCorrect: null,
+               scoreAwarded: 0,
+             });
+           }
+         } catch (err) {
+           console.error('Error handling session update gameplay progress:', err);
+         }
       }
     },
 
@@ -692,17 +704,23 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
       // Fetch options for the active question
       let options: Option[] = [];
-      if (isMock) {
-        const mockOpts = localStorage.getItem(`options_${activeQ.id}`);
-        options = mockOpts ? JSON.parse(mockOpts) : [];
-      } else {
-        const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-        const { data } = await supabase
-          .from('options')
-          .select('*')
-          .eq('question_id', activeQ.id)
-          .neq('id', cacheBusterOpts);
-        options = (data as Option[]) || [];
+      try {
+        if (isMock) {
+          const mockOpts = localStorage.getItem(`options_${activeQ.id}`);
+          options = mockOpts ? JSON.parse(mockOpts) : [];
+        } else {
+          const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+          const { data, error } = await supabase
+            .from('options')
+            .select('*')
+            .eq('question_id', activeQ.id)
+            .neq('id', cacheBusterOpts);
+          if (error) throw error;
+          options = (data as Option[]) || [];
+        }
+      } catch (err) {
+        console.error('setQuestionProgress failed to fetch options:', err);
+        throw new Error('Gagal memuat pilihan jawaban dari server. Harap periksa jaringan Anda.');
       }
 
       // Check if this question is already answered in the map
@@ -723,16 +741,22 @@ export const usePlayStore = create<PlayState>((set, get) => {
       const updatedPart = { ...participant, current_progress: index };
       set({ participant: updatedPart });
 
-      if (isMock) {
-        const partsKey = `participants_${session.id}`;
-        const parts = JSON.parse(localStorage.getItem(partsKey) || '[]');
-        const updatedParts = parts.map((p: any) => p.id === participant.id ? updatedPart : p);
-        localStorage.setItem(partsKey, JSON.stringify(updatedParts));
-      } else {
-        await supabase
-          .from('participants')
-          .update({ current_progress: index })
-          .eq('id', participant.id);
+      try {
+        if (isMock) {
+          const partsKey = `participants_${session.id}`;
+          const parts = JSON.parse(localStorage.getItem(partsKey) || '[]');
+          const updatedParts = parts.map((p: any) => p.id === participant.id ? updatedPart : p);
+          localStorage.setItem(partsKey, JSON.stringify(updatedParts));
+        } else {
+          const { error } = await supabase
+            .from('participants')
+            .update({ current_progress: index })
+            .eq('id', participant.id);
+          if (error) throw error;
+        }
+      } catch (err) {
+        console.warn('Failed to update current progress on server:', err);
+        // Don't throw here to avoid disrupting client gameplay flow if local state updated successfully
       }
     },
 

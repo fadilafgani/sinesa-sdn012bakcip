@@ -9,9 +9,10 @@ import {
   AlertCircle, Eye 
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { showConfirm } from '../../lib/swal';
+import { showConfirm, showError } from '../../lib/swal';
 import { supabase } from '../../lib/supabase';
 import type { Option, Participant } from '../../types';
+import { LazyImage } from '../../components/lazy-image';
 
 export const PlaySession: React.FC = () => {
   const navigate = useNavigate();
@@ -52,6 +53,20 @@ export const PlaySession: React.FC = () => {
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
   const [matchingAnswers, setMatchingAnswers] = useState<Record<string, string>>({});
   const [shuffledMatches, setShuffledMatches] = useState<string[]>([]);
+  const [isProgressing, setIsProgressing] = useState(false);
+
+  const handleProgressQuestion = async (nextIdx: number) => {
+    if (isProgressing) return;
+    setIsProgressing(true);
+    try {
+      await setQuestionProgress(nextIdx);
+    } catch (err: any) {
+      console.error('Failed to change question:', err);
+      showError('Gagal', `Gagal memuat soal berikutnya: ${err.message || err}`);
+    } finally {
+      setIsProgressing(false);
+    }
+  };
 
   const selectedOptionIdsRef = useRef<string[]>([]);
   const matchingAnswersRef = useRef<Record<string, string>>({});
@@ -579,7 +594,7 @@ export const PlaySession: React.FC = () => {
           className="glass-panel p-8 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-amber-500/10"
         >
           <div className="relative inline-block">
-            <img
+            <LazyImage
               src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(participant?.display_name || 'Murid')}`}
               alt="avatar"
               className="h-20 w-20 rounded-full border bg-background mx-auto"
@@ -702,10 +717,13 @@ export const PlaySession: React.FC = () => {
                   {q.media_url && (
                     <div className="flex justify-center bg-card/40 rounded-2xl p-3 border max-h-[180px] overflow-hidden">
                       {q.media_type === 'image' && (
-                        <img src={q.media_url} alt="soal media" className="max-h-[150px] object-contain rounded-lg" />
+                        <LazyImage src={q.media_url} alt="soal media" className="max-h-[150px] object-contain rounded-lg" />
                       )}
                       {q.media_type === 'audio' && (
                         <audio controls src={q.media_url} className="scale-90" />
+                      )}
+                      {q.media_type === 'video' && (
+                        <video controls src={q.media_url} className="max-h-[150px] rounded-lg" />
                       )}
                       {q.media_type === 'latex' && (
                         <LatexRenderer tex={q.media_url} displayMode />
@@ -1051,14 +1069,14 @@ export const PlaySession: React.FC = () => {
                 <button
                   onClick={() => {
                     setShowReviewScreen(false);
-                    setQuestionProgress(idx);
+                    handleProgressQuestion(idx);
                   }}
                   className={`px-4 py-2 rounded-xl text-xs font-black transition ${
-                    isLocked 
+                    isLocked || isProgressing
                       ? 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-50' 
                       : 'bg-primary text-primary-foreground hover:scale-102 active:scale-98'
                   }`}
-                  disabled={isLocked}
+                  disabled={isLocked || isProgressing}
                 >
                   {isLocked ? 'Terkunci' : 'Kerjakan'}
                 </button>
@@ -1202,11 +1220,11 @@ export const PlaySession: React.FC = () => {
                   type="button"
                   onClick={() => {
                     if (isLocked) return;
-                    setQuestionProgress(idx);
+                    handleProgressQuestion(idx);
                   }}
-                  disabled={isLocked}
+                  disabled={isLocked || isProgressing}
                   className={`h-9 w-9 text-xs rounded-xl flex items-center justify-center border font-bold transition duration-200 outline-none ${btnStyle} ${
-                    isLocked ? 'opacity-40 cursor-not-allowed border-dashed' : 'hover:bg-muted active:scale-95'
+                    (isLocked || isProgressing) ? 'opacity-40 cursor-not-allowed border-dashed' : 'hover:bg-muted active:scale-95'
                   }`}
                   title={`Soal ${idx + 1} (${status})`}
                 >
@@ -1239,7 +1257,7 @@ export const PlaySession: React.FC = () => {
                   setZoomResetKey(prev => prev + 1);
                 }}
               >
-                <img 
+                <LazyImage 
                   src={currentQuestion.media_url} 
                   alt="soal" 
                   className="max-h-[185px] object-contain rounded-xl group-hover:scale-[1.02] transition-transform duration-300" 
@@ -1255,6 +1273,11 @@ export const PlaySession: React.FC = () => {
               <div className="flex items-center gap-3 py-4">
                 <Volume2 className="h-7 w-7 text-primary animate-pulse" />
                 <audio controls src={currentQuestion.media_url} autoPlay />
+              </div>
+            )}
+            {currentQuestion.media_type === 'video' && (
+              <div className="flex items-center justify-center max-h-[185px] w-full">
+                <video controls src={currentQuestion.media_url} autoPlay className="max-h-[185px] rounded-xl border bg-black" />
               </div>
             )}
             {currentQuestion.media_type === 'latex' && (
@@ -1333,19 +1356,27 @@ export const PlaySession: React.FC = () => {
               {isSelfPaced && (
                 <button
                   type="button"
+                  disabled={isProgressing}
                   onClick={async () => {
                     setShowFeedback(false);
                     setShowExplanationPanel(false);
                     setShowStatsPanel(false);
                     if (currentQuestionIndex + 1 < questions.length) {
-                      await setQuestionProgress(currentQuestionIndex + 1);
+                      await handleProgressQuestion(currentQuestionIndex + 1);
                     } else {
                       setShowReviewScreen(true);
                     }
                   }}
-                  className="px-4 py-2.5 text-xs font-black rounded-xl bg-foreground text-background shadow hover:opacity-90 active:scale-95 transition"
+                  className="px-4 py-2.5 text-xs font-black rounded-xl bg-foreground text-background shadow hover:opacity-90 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
-                  Lanjut
+                  {isProgressing ? (
+                    <>
+                      <span className="h-3.5 w-3.5 border-2 border-background border-t-transparent rounded-full animate-spin" />
+                      Memuat...
+                    </>
+                  ) : (
+                    'Lanjut'
+                  )}
                 </button>
               )}
             </div>
@@ -1737,16 +1768,24 @@ export const PlaySession: React.FC = () => {
           <div className="mt-6">
             <button
               type="button"
+              disabled={isProgressing}
               onClick={async () => {
                 if (currentQuestionIndex + 1 < questions.length) {
-                  await setQuestionProgress(currentQuestionIndex + 1);
+                  await handleProgressQuestion(currentQuestionIndex + 1);
                 } else {
                   setShowReviewScreen(true);
                 }
               }}
-              className="w-full flex items-center justify-center gap-2 py-4 bg-primary text-primary-foreground font-black text-base rounded-2xl shadow-lg hover:bg-primary/95 transition active:scale-[0.98]"
+              className="w-full flex items-center justify-center gap-2 py-4 bg-primary text-primary-foreground font-black text-base rounded-2xl shadow-lg hover:bg-primary/95 transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {currentQuestionIndex + 1 < questions.length ? 'Soal Berikutnya' : 'Review & Kirim Jawaban Akhir'}
+              {isProgressing ? (
+                <>
+                  <span className="h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                  Memuat Soal...
+                </>
+              ) : (
+                currentQuestionIndex + 1 < questions.length ? 'Soal Berikutnya' : 'Review & Kirim Jawaban Akhir'
+              )}
             </button>
           </div>
         )}

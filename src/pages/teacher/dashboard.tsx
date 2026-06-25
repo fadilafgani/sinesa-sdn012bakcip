@@ -197,8 +197,10 @@ export const TeacherDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchQuizzes();
-  }, []);
+    if (profile?.id) {
+      fetchQuizzes();
+    }
+  }, [profile?.id, isMock]);
 
   const handleLaunchQuiz = (quizId: string) => {
     navigate(`/teacher/host-session?id=${quizId}`);

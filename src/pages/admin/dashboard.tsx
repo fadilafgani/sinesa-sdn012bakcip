@@ -24,12 +24,15 @@ import {
   Eye,
   EyeOff,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  UploadCloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '../../lib/swal';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { LazyImage } from '../../components/lazy-image';
+import { mediaStorageService } from '../../services/media-storage';
 
 export const AdminDashboard: React.FC = () => {
   const { signOut, isMock, profile: adminProfile } = useAuthStore();
@@ -68,8 +71,11 @@ export const AdminDashboard: React.FC = () => {
     username: '',
     password: '',
     role: 'student' as UserRole,
-    status: 'active' as 'active' | 'inactive'
+    status: 'active' as 'active' | 'inactive',
+    avatarUrl: ''
   });
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarProgress, setAvatarProgress] = useState<number | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
 
@@ -450,6 +456,43 @@ export const AdminDashboard: React.FC = () => {
   };
 
   // User CRUD Operations
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      showError('Gagal', 'Format berkas harus berupa gambar (PNG, JPG, JPEG, WEBP).');
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      showError('Gagal', 'Ukuran gambar maksimal adalah 2 MB.');
+      return;
+    }
+
+    setAvatarUploading(true);
+    setAvatarProgress(0);
+
+    try {
+      const result = await mediaStorageService.replace(file, userForm.avatarUrl || '', {
+        type: 'profiles',
+        onProgress: (p) => setAvatarProgress(p)
+      });
+
+      if (!result.success) {
+        throw new Error(result.message || 'Gagal mengunggah avatar.');
+      }
+
+      setUserForm(prev => ({ ...prev, avatarUrl: result.url }));
+    } catch (err: any) {
+      console.error('Avatar upload error:', err);
+      showError('Gagal', `Gagal mengunggah foto profil: ${err.message}`);
+    } finally {
+      setAvatarUploading(false);
+      setAvatarProgress(null);
+    }
+  };
+
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userForm.fullName || !userForm.email || !userForm.username) {
@@ -472,7 +515,8 @@ export const AdminDashboard: React.FC = () => {
               username: userForm.username,
               role: userForm.role,
               status: userForm.status,
-              email: userForm.email
+              email: userForm.email,
+              avatar_url: userForm.avatarUrl || p.avatar_url
             };
           }
           return p;
@@ -485,7 +529,8 @@ export const AdminDashboard: React.FC = () => {
           email: p.email || (p.username ? p.username + '@sinesa.com' : 'user@sinesa.com'),
           username: p.username,
           role: p.role,
-          status: p.status
+          status: p.status,
+          avatarUrl: p.avatar_url
         }));
         localStorage.setItem('mock_profiles', JSON.stringify(customProfs));
 
@@ -500,7 +545,7 @@ export const AdminDashboard: React.FC = () => {
           role: userForm.role,
           status: userForm.status,
           email: userForm.email,
-          avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`,
+          avatar_url: userForm.avatarUrl || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`,
           created_at: new Date().toISOString()
         };
         setProfiles(prev => [newProf, ...prev]);
@@ -512,7 +557,8 @@ export const AdminDashboard: React.FC = () => {
           email: userForm.email,
           username: userForm.username,
           role: userForm.role,
-          status: userForm.status
+          status: userForm.status,
+          avatarUrl: userForm.avatarUrl
         });
         localStorage.setItem('mock_profiles', JSON.stringify(customProfs));
 
@@ -535,12 +581,13 @@ export const AdminDashboard: React.FC = () => {
             username: userForm.username,
             role: userForm.role,
             status: userForm.status,
-            email: userForm.email
+            email: userForm.email,
+            avatar_url: userForm.avatarUrl || null
           })
           .eq('id', selectedUser.id);
         
         if (error) throw error;
-        setProfiles(profiles.map(p => p.id === selectedUser.id ? { ...p, full_name: userForm.fullName, username: userForm.username, role: userForm.role, status: userForm.status, email: userForm.email } : p));
+        setProfiles(profiles.map(p => p.id === selectedUser.id ? { ...p, full_name: userForm.fullName, username: userForm.username, role: userForm.role, status: userForm.status, email: userForm.email, avatar_url: userForm.avatarUrl || p.avatar_url } : p));
         createLog('EDIT_USER', `Mengedit profil pengguna online: ${userForm.fullName} (${selectedUser.id})`);
         showSuccess('Berhasil', 'Data pengguna online diperbarui!');
       } else {
@@ -577,7 +624,7 @@ export const AdminDashboard: React.FC = () => {
             role: userForm.role,
             status: userForm.status,
             email: userForm.email,
-            avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`
+            avatar_url: userForm.avatarUrl || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`
           });
         
         if (profErr) throw profErr;
@@ -589,7 +636,7 @@ export const AdminDashboard: React.FC = () => {
           role: userForm.role,
           status: userForm.status,
           email: userForm.email,
-          avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`,
+          avatar_url: userForm.avatarUrl || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`,
           created_at: new Date().toISOString()
         }, ...prev]);
 
@@ -970,7 +1017,7 @@ export const AdminDashboard: React.FC = () => {
         <div className="p-4 border-t border-border bg-muted/20">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img 
+              <LazyImage 
                 src={adminProfile?.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=admin`}
                 alt="Admin Avatar"
                 className="h-9 w-9 rounded-xl border bg-background"
@@ -1125,7 +1172,7 @@ export const AdminDashboard: React.FC = () => {
                               <div key={us.id} className="flex items-center justify-between py-2 text-xs">
                                 <div className="flex items-center gap-2 text-left">
                                   <div className="relative">
-                                    <img 
+                                    <LazyImage 
                                       src={u?.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u?.full_name || 'us')}`}
                                       alt="Avatar"
                                       className="h-8 w-8 rounded-lg bg-background"
@@ -1248,7 +1295,8 @@ export const AdminDashboard: React.FC = () => {
                             username: '',
                             password: '',
                             role: 'student',
-                            status: 'active'
+                            status: 'active',
+                            avatarUrl: ''
                           });
                           setShowAddUserModal(true);
                         }}
@@ -1277,7 +1325,7 @@ export const AdminDashboard: React.FC = () => {
                               <tr key={u.id} className="hover:bg-muted/10 transition">
                                 <td className="px-6 py-4">
                                   <div className="flex items-center gap-3 text-left">
-                                    <img 
+                                    <LazyImage 
                                       src={u.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u.full_name)}`}
                                       alt={u.full_name}
                                       className="h-10 w-10 rounded-full border bg-background"
@@ -1325,7 +1373,8 @@ export const AdminDashboard: React.FC = () => {
                                           username: u.username || '',
                                           password: '',
                                           role: u.role,
-                                          status: u.status || 'active'
+                                          status: u.status || 'active',
+                                          avatarUrl: u.avatar_url || ''
                                         });
                                         setShowEditUserModal(true);
                                       }}
@@ -1882,6 +1931,40 @@ export const AdminDashboard: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveUser} className="p-5 space-y-4 text-left">
+              {/* Avatar Upload */}
+              <div className="flex items-center gap-4 p-3 rounded-2xl border bg-muted/20">
+                <div className="relative h-14 w-14 rounded-full border overflow-hidden shrink-0 bg-background flex items-center justify-center">
+                  {userForm.avatarUrl ? (
+                    <LazyImage src={userForm.avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                  ) : (
+                    <LazyImage src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName || 'User')}`} alt="Avatar placeholder" className="h-full w-full object-cover" />
+                  )}
+                </div>
+                <div className="flex-1 space-y-1.5">
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase block">Foto Profil (Opsional)</span>
+                  {avatarUploading ? (
+                    <div className="w-full">
+                      <span className="text-[10px] text-primary font-bold block mb-1">Mengunggah... {avatarProgress}%</span>
+                      <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                        <div className="bg-primary h-full transition-all duration-150" style={{ width: `${avatarProgress}%` }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-dashed hover:bg-muted cursor-pointer text-[10px] font-semibold text-muted-foreground hover:text-foreground transition select-none">
+                      <UploadCloud className="h-3.5 w-3.5" />
+                      Pilih Foto Profil
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        onChange={handleAvatarUpload}
+                        className="hidden"
+                      />
+                    </label>
+                  )}
+                  <p className="text-[9px] text-muted-foreground font-semibold">Maksimal 2 MB (PNG, JPG, WEBP)</p>
+                </div>
+              </div>
+
               <div>
                 <label className="text-[10px] font-bold text-muted-foreground uppercase block mb-1">Nama Lengkap</label>
                 <input 

@@ -50,7 +50,7 @@ export interface Question {
   quiz_id: string;
   question_text: string;
   question_type?: QuestionType;
-  media_type: 'text' | 'image' | 'audio' | 'latex';
+  media_type: 'text' | 'image' | 'audio' | 'video' | 'latex';
   media_url: string | null;
   points: number;
   order_index: number;

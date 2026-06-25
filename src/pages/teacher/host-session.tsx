@@ -5,11 +5,12 @@ import { useAuthStore } from '../../store/auth-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
-import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Heart } from 'lucide-react';
+import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Heart, Copy, Check } from 'lucide-react';
 import { LatexRenderer } from '../../components/latex-renderer';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError } from '../../lib/swal';
 import { supabase } from '../../lib/supabase';
+import { LazyImage } from '../../components/lazy-image';
 
 export const HostSession: React.FC = () => {
   const navigate = useNavigate();
@@ -39,6 +40,8 @@ export const HostSession: React.FC = () => {
   const [timer, setTimer] = useState<number>(0);
   const [showAnswerState, setShowAnswerState] = useState<boolean>(false);
   const [showLeaderboardState, setShowLeaderboardState] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isStartingGame, setIsStartingGame] = useState<boolean>(false);
   
   // Zoom Media State
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -46,6 +49,17 @@ export const HostSession: React.FC = () => {
   const [zoomResetKey, setZoomResetKey] = useState<number>(0);
   
   const timerRef = useRef<number | null>(null);
+
+  const handleCopyPin = async () => {
+    if (!pinCode) return;
+    try {
+      await navigator.clipboard.writeText(pinCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy PIN:', err);
+    }
+  };
 
   // Diagnostics State
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
@@ -246,6 +260,8 @@ export const HostSession: React.FC = () => {
 
   // Launch the quiz lobby -> active state
   const handleStartGame = async () => {
+    if (isStartingGame) return;
+    setIsStartingGame(true);
     console.log('HostSession: handleStartGame clicked. Questions loaded =', questions.length);
 
     let currentQuestions = questions;
@@ -259,6 +275,7 @@ export const HostSession: React.FC = () => {
 
     if (currentQuestions.length === 0) {
       showError('Soal Kosong', 'Gagal memuat soal kuis dari database. Silakan tunggu beberapa saat agar database siap, lalu klik Mulai Kuis lagi.');
+      setIsStartingGame(false);
       return;
     }
 
@@ -269,7 +286,10 @@ export const HostSession: React.FC = () => {
         'Ya, Mulai',
         'Batal'
       );
-      if (!confirmRes.isConfirmed) return;
+      if (!confirmRes.isConfirmed) {
+        setIsStartingGame(false);
+        return;
+      }
     }
     
     try {
@@ -283,6 +303,8 @@ export const HostSession: React.FC = () => {
     } catch (err: any) {
       console.error('HostSession: Error starting game:', err);
       showError('Gagal', `Gagal memulai kuis: ${err.message || err}`);
+    } finally {
+      setIsStartingGame(false);
     }
   };
 
@@ -371,11 +393,25 @@ export const HostSession: React.FC = () => {
         </div>
         
         {/* Large Code Display */}
-        <div className="space-y-2">
+        <div className="space-y-2 flex flex-col items-center">
           <span className="text-[10px] uppercase font-bold text-muted-foreground">KODE PIN MASUK</span>
-          <h2 className="text-6xl font-black tracking-wider text-primary select-all">
-            {pinCode || '------'}
-          </h2>
+          <div className="flex items-center gap-4 justify-center bg-primary/5 px-8 py-3 rounded-2xl border border-primary/10 hover:border-primary/20 transition-all duration-300 group relative">
+            <h2 className="text-6xl font-black tracking-wider text-primary font-mono select-all">
+              {pinCode || '------'}
+            </h2>
+            <button
+              onClick={handleCopyPin}
+              disabled={!pinCode}
+              title="Salin PIN"
+              className="p-2 rounded-xl hover:bg-primary/10 active:scale-95 transition-all text-primary/70 hover:text-primary cursor-pointer flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {copied ? (
+                <Check className="h-6 w-6 text-green-600 animate-in fade-in zoom-in-75 duration-200" />
+              ) : (
+                <Copy className="h-6 w-6 transition-transform group-hover:scale-110" />
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="border-t border-border pt-6 flex items-center justify-between">
@@ -387,10 +423,20 @@ export const HostSession: React.FC = () => {
           </div>
           <button
             onClick={handleStartGame}
-            className="flex items-center gap-2.5 rounded-2xl bg-green-600 text-white px-6 py-3.5 font-bold shadow-lg shadow-green-600/25 hover:bg-green-700 transition"
+            disabled={isStartingGame}
+            className="flex items-center gap-2.5 rounded-2xl bg-green-600 text-white px-6 py-3.5 font-bold shadow-lg shadow-green-600/25 hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Play className="h-4 w-4 fill-white" />
-            Mulai Kuis
+            {isStartingGame ? (
+              <>
+                <span className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Memulai...
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 fill-white" />
+                Mulai Kuis
+              </>
+            )}
           </button>
         </div>
       </motion.div>
@@ -416,7 +462,7 @@ export const HostSession: React.FC = () => {
                   transition={{ type: "spring", stiffness: 200, damping: 15 }}
                   className="glass-panel px-4 py-3 rounded-2xl border text-center font-bold text-sm text-foreground flex items-center gap-2 justify-center"
                 >
-                  <img
+                  <LazyImage
                     src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
                     alt="avatar"
                     className="h-6 w-6 rounded-full"
@@ -486,7 +532,7 @@ export const HostSession: React.FC = () => {
                   setZoomResetKey(prev => prev + 1);
                 }}
               >
-                <img 
+                <LazyImage 
                   src={currentQuestion.media_url} 
                   alt="Media soal" 
                   className="max-h-[250px] object-contain rounded-2xl group-hover:scale-[1.02] transition-transform duration-300" 
@@ -502,6 +548,11 @@ export const HostSession: React.FC = () => {
               <div className="flex items-center gap-3 py-6">
                 <Volume2 className="h-8 w-8 text-primary animate-pulse" />
                 <audio controls src={currentQuestion.media_url} autoPlay />
+              </div>
+            )}
+            {currentQuestion.media_type === 'video' && (
+              <div className="flex items-center justify-center max-h-[250px] w-full">
+                <video controls src={currentQuestion.media_url} autoPlay className="max-h-[250px] rounded-2xl border bg-black" />
               </div>
             )}
             {currentQuestion.media_type === 'latex' && (
@@ -698,7 +749,7 @@ export const HostSession: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 text-foreground flex items-center gap-2">
-                    <img
+                    <LazyImage
                       src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(player.display_name)}`}
                       alt="avatar"
                       className="h-7 w-7 rounded-full"
@@ -756,7 +807,7 @@ export const HostSession: React.FC = () => {
               className="w-32 bg-slate-300 dark:bg-slate-700 border border-slate-400 rounded-t-3xl flex flex-col justify-end items-center pb-4 space-y-2 relative"
             >
               <div className="absolute -top-12 flex flex-col items-center">
-                <img
+                <LazyImage
                   src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(second.display_name)}`}
                   alt="2nd"
                   className="h-10 w-10 rounded-full border bg-background"
@@ -780,7 +831,7 @@ export const HostSession: React.FC = () => {
             >
               <div className="absolute -top-14 flex flex-col items-center">
                 <span className="text-lg animate-bounce">👑</span>
-                <img
+                <LazyImage
                   src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(first.display_name)}`}
                   alt="1st"
                   className="h-12 w-12 rounded-full border-2 border-yellow-500 bg-background"
@@ -803,7 +854,7 @@ export const HostSession: React.FC = () => {
               className="w-32 bg-amber-600 border border-amber-700 rounded-t-3xl flex flex-col justify-end items-center pb-4 space-y-2 relative"
             >
               <div className="absolute -top-12 flex flex-col items-center">
-                <img
+                <LazyImage
                   src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(third.display_name)}`}
                   alt="3rd"
                   className="h-10 w-10 rounded-full border bg-background"
@@ -888,7 +939,7 @@ export const HostSession: React.FC = () => {
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <img
+                      <LazyImage
                         src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
                         alt="avatar"
                         className="h-10 w-10 rounded-full border bg-background"
