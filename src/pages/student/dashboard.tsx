@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
 import { usePlayStore } from '../../store/play-store';
 import { supabase } from '../../lib/supabase';
@@ -28,6 +28,7 @@ export const StudentDashboard: React.FC = () => {
   const { profile, signOut, isMock } = useAuthStore();
   const { joinSession, error: joinError, loading: joining } = usePlayStore();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [pinCode, setPinCode] = useState('');
   const [displayName, setDisplayName] = useState(profile?.full_name || '');
@@ -314,7 +315,7 @@ export const StudentDashboard: React.FC = () => {
     };
 
     fetchHistory();
-  }, [profile?.id, isMock]);
+  }, [profile?.id, isMock, location.key]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();

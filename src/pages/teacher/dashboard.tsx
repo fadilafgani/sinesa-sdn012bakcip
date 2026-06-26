@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
 import { supabase } from '../../lib/supabase';
 import type { Quiz } from '../../types';
@@ -10,6 +10,7 @@ import { showConfirm, showError, showSuccess } from '../../lib/swal';
 export const TeacherDashboard: React.FC = () => {
   const { profile, signOut, isMock } = useAuthStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -178,6 +179,7 @@ export const TeacherDashboard: React.FC = () => {
     }
 
     try {
+      console.log('TeacherDashboard: fetchQuizzes starting, profile id =', profile?.id);
       const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
       const { data, error } = await supabase
         .from('quizzes')
@@ -186,7 +188,10 @@ export const TeacherDashboard: React.FC = () => {
         .neq('id', cacheBuster)
         .order('created_at', { ascending: false });
 
-      if (!error && data) {
+      if (error) {
+        console.error('TeacherDashboard: Supabase error fetching quizzes:', error);
+      } else if (data) {
+        console.log('TeacherDashboard: successfully fetched quizzes count =', data.length);
         setQuizzes(data as Quiz[]);
       }
     } catch (err) {
@@ -198,9 +203,10 @@ export const TeacherDashboard: React.FC = () => {
 
   useEffect(() => {
     if (profile?.id) {
+      console.log('TeacherDashboard: useEffect triggered for fetchQuizzes, location key =', location.key);
       fetchQuizzes();
     }
-  }, [profile?.id, isMock]);
+  }, [profile?.id, isMock, location.key]);
 
   const handleLaunchQuiz = (quizId: string) => {
     navigate(`/teacher/host-session?id=${quizId}`);
