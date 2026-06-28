@@ -584,6 +584,34 @@ export const usePlayStore = create<PlayState>((set, get) => {
           get().handleSessionUpdate(updatedSess);
         })
         .subscribe();
+
+      // Start a fallback polling interval (every 2 seconds) in case Supabase Realtime fails in production
+      const intervalId = window.setInterval(async () => {
+        try {
+          const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+          const { data: latestSess, error } = await supabase
+            .from('quiz_sessions')
+            .select('*')
+            .eq('id', sessionId)
+            .neq('id', cacheBuster)
+            .single();
+
+          if (!error && latestSess) {
+            const previousSess = get().session;
+            const indexChanged = previousSess?.current_question_index !== latestSess.current_question_index;
+            const statusChanged = previousSess?.status !== latestSess.status;
+            
+            if (statusChanged || indexChanged) {
+              console.log('play-store polling fallback: session updated', latestSess);
+              await get().handleSessionUpdate(latestSess as QuizSession);
+            }
+          }
+        } catch (err) {
+          console.error('play-store polling fallback error:', err);
+        }
+      }, 2000);
+
+      set({ pollingInterval: intervalId });
     },
 
     stopListening: () => {

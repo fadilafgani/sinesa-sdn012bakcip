@@ -154,10 +154,10 @@ export const HostSession: React.FC = () => {
     };
   }, [quizId]);
 
-  // Auto-reload questions if they are empty in the lobby (handles replica lag from editor)
+  // Auto-reload questions if they are empty (handles replica lag from editor)
   useEffect(() => {
-    if (activeSession?.status === 'lobby' && questions.length === 0 && quizId) {
-      console.log('HostSession: Questions are empty in lobby. Starting background check...');
+    if (activeSession && questions.length === 0 && quizId) {
+      console.log('HostSession: Questions are empty. Starting background check...');
       const interval = setInterval(async () => {
         const fetched = await useHostStore.getState().fetchQuestions(quizId);
         if (fetched && fetched.length > 0) {
