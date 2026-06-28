@@ -249,7 +249,7 @@ export const QuizEditor: React.FC = () => {
                 id: q.id,
                 question_text: q.question_text,
                 question_type: (q as any).question_type || 'multiple_choice',
-                media_type: q.media_type as 'text' | 'image' | 'audio' | 'latex',
+                media_type: q.media_type as 'text' | 'image' | 'audio' | 'video' | 'latex',
                 media_url: q.media_url,
                 points: q.points,
                 explanation: q.explanation || '',
@@ -324,11 +324,12 @@ export const QuizEditor: React.FC = () => {
       maxLimit = 2 * 1024 * 1024;
       limitLabel = '2 MB';
     } else {
-      if (file.type.startsWith('audio/')) {
+      const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+      if (file.type.startsWith('audio/') || ['.mp3', '.wav', '.ogg'].includes(fileExt)) {
         uploadType = 'quiz-audio';
         maxLimit = 10 * 1024 * 1024;
         limitLabel = '10 MB';
-      } else if (file.type.startsWith('video/')) {
+      } else if (file.type.startsWith('video/') || ['.mp4', '.webm', '.mov', '.mkv'].includes(fileExt)) {
         uploadType = 'quiz-videos';
         maxLimit = 50 * 1024 * 1024;
         limitLabel = '50 MB';
