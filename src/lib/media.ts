@@ -10,6 +10,14 @@ export const getSafeMediaUrl = (url: string | null | undefined): string => {
   if (url.includes('/uploads/')) {
     const uploadIndex = url.indexOf('/uploads/');
     const relativePath = url.substring(uploadIndex); // e.g., "/uploads/quiz-videos/..."
+    
+    // Route video and audio files through stream.php to bypass direct static file blocks (403 Forbidden)
+    if (relativePath.includes('/quiz-videos/') || relativePath.includes('/quiz-audio/')) {
+      const filename = relativePath.substring(relativePath.lastIndexOf('/') + 1);
+      const type = relativePath.includes('/quiz-audio/') ? 'audio' : 'video';
+      return `${window.location.origin}/api/stream.php?file=${filename}&type=${type}`;
+    }
+    
     return window.location.origin + relativePath;
   }
   
