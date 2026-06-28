@@ -45,6 +45,7 @@ export const StudentDashboard: React.FC = () => {
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<any | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   // Image Zoom states
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export const StudentDashboard: React.FC = () => {
     setSelectedHistoryItem(item);
     setDetailLoading(true);
     setDetailData(null);
+    setDetailError(null);
 
     if (isMock) {
       await new Promise(resolve => setTimeout(resolve, 600));
@@ -163,6 +165,9 @@ export const StudentDashboard: React.FC = () => {
       setDetailLoading(false);
       return;
     }
+
+    // Auto-refresh token if expired
+    try { await supabase.auth.getSession(); } catch (e) {}
 
     try {
       const { data: partData, error: partErr } = await supabase
@@ -232,8 +237,9 @@ export const StudentDashboard: React.FC = () => {
         options: groupedOptions,
         answers: answersMap
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching quiz detail:', err);
+      setDetailError(err?.message || 'Gagal memuat detail kuis. Periksa koneksi internet Anda.');
     } finally {
       setDetailLoading(false);
     }
@@ -605,6 +611,18 @@ export const StudentDashboard: React.FC = () => {
                   <div className="py-20 flex flex-col items-center justify-center space-y-4">
                     <div className="h-10 w-10 animate-spin border-4 border-amber-500 border-t-transparent rounded-full" />
                     <p className="text-sm font-semibold text-muted-foreground">Memuat detail hasil kuis...</p>
+                  </div>
+                ) : detailError ? (
+                  <div className="py-20 flex flex-col items-center justify-center space-y-4 text-center px-4">
+                    <div className="h-12 w-12 bg-destructive/10 border border-destructive/25 rounded-full flex items-center justify-center text-destructive text-2xl">⚠️</div>
+                    <p className="text-sm font-bold text-foreground">Gagal Memuat Detail</p>
+                    <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">{detailError}</p>
+                    <button
+                      onClick={() => handleViewDetail(selectedHistoryItem)}
+                      className="px-5 py-2.5 bg-primary text-primary-foreground font-bold text-xs rounded-xl hover:opacity-90 active:scale-95 transition"
+                    >
+                      Coba Lagi
+                    </button>
                   </div>
                 ) : detailData ? (
                   <>
