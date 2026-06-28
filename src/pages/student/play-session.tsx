@@ -13,6 +13,7 @@ import { showConfirm, showError } from '../../lib/swal';
 import { supabase } from '../../lib/supabase';
 import type { Option, Participant } from '../../types';
 import { LazyImage } from '../../components/lazy-image';
+import { getSafeMediaUrl } from '../../lib/media';
 
 export const PlaySession: React.FC = () => {
   const navigate = useNavigate();
@@ -720,10 +721,10 @@ export const PlaySession: React.FC = () => {
                         <LazyImage src={q.media_url} alt="soal media" className="max-h-[150px] object-contain rounded-lg" />
                       )}
                       {q.media_type === 'audio' && (
-                        <audio controls src={q.media_url} className="scale-90" />
+                        <audio controls src={getSafeMediaUrl(q.media_url)} className="scale-90" />
                       )}
                       {q.media_type === 'video' && (
-                        <video controls src={q.media_url} className="max-h-[150px] rounded-lg" />
+                        <video controls src={getSafeMediaUrl(q.media_url)} className="max-h-[150px] rounded-lg" />
                       )}
                       {q.media_type === 'latex' && (
                         <LatexRenderer tex={q.media_url} displayMode />
@@ -1272,12 +1273,12 @@ export const PlaySession: React.FC = () => {
             {currentQuestion.media_type === 'audio' && (
               <div className="flex items-center gap-3 py-4">
                 <Volume2 className="h-7 w-7 text-primary animate-pulse" />
-                <audio controls src={currentQuestion.media_url} autoPlay />
+                <audio controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay />
               </div>
             )}
             {currentQuestion.media_type === 'video' && (
               <div className="flex items-center justify-center max-h-[185px] w-full">
-                <video controls src={currentQuestion.media_url} autoPlay className="max-h-[185px] rounded-xl border bg-black" />
+                <video controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay className="max-h-[185px] rounded-xl border bg-black" />
               </div>
             )}
             {currentQuestion.media_type === 'latex' && (

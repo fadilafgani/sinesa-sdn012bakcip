@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/auth-store';
 import { usePlayStore } from '../../store/play-store';
 import { supabase } from '../../lib/supabase';
 import { ThemeToggle } from '../../components/theme-toggle';
+import { getSafeMediaUrl } from '../../lib/media';
 import { 
   LogOut, 
   ArrowRight, 
@@ -748,11 +749,11 @@ export const StudentDashboard: React.FC = () => {
                                       </div>
                                     ) : q.media_type === 'audio' ? (
                                       <div className="max-w-xs">
-                                        <audio controls src={q.media_url} className="w-full scale-90 origin-left" />
+                                        <audio controls src={getSafeMediaUrl(q.media_url)} className="w-full scale-90 origin-left" />
                                       </div>
                                     ) : q.media_type === 'video' ? (
                                       <div className="max-w-xs overflow-hidden rounded-xl border">
-                                        <video controls src={q.media_url} className="max-h-40 w-full bg-black" />
+                                        <video controls src={getSafeMediaUrl(q.media_url)} className="max-h-40 w-full bg-black" />
                                       </div>
                                     ) : q.media_type === 'latex' ? (
                                       <div className="p-3 bg-card rounded-xl border border-border">

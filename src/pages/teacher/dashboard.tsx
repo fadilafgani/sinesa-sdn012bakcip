@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
 import { supabase } from '../../lib/supabase';
 import type { Quiz } from '../../types';
+import { getSafeMediaUrl } from '../../lib/media';
 import { Plus, Edit2, Play, BarChart2, Trash2, LogOut, BookOpen, Clock, Layers } from 'lucide-react';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '../../lib/swal';
@@ -334,7 +335,7 @@ export const TeacherDashboard: React.FC = () => {
                     {/* Thumbnail */}
                     <div className="h-40 bg-muted relative overflow-hidden">
                       <img
-                        src={quiz.thumbnail_url || 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&q=80'}
+                        src={getSafeMediaUrl(quiz.thumbnail_url) || 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?w=400&q=80'}
                         alt={quiz.title}
                         className="h-full w-full object-cover"
                       />

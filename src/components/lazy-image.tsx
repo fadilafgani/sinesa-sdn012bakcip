@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Image as ImageIcon } from 'lucide-react';
+import { getSafeMediaUrl } from '../lib/media';
 
 interface LazyImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackSrc?: string;
@@ -39,7 +40,7 @@ export const LazyImage: React.FC<LazyImageProps> = ({
         </div>
       ) : (
         <img
-          src={src || fallbackSrc}
+          src={getSafeMediaUrl(src) || fallbackSrc}
           alt={alt}
           loading="lazy"
           onLoad={() => setLoaded(true)}

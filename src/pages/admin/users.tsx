@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '../../lib/swal';
+import { getSafeMediaUrl } from '../../lib/media';
 
 export const UsersCrud: React.FC = () => {
   const { signOut, isMock } = useAuthStore();
@@ -302,7 +303,7 @@ export const UsersCrud: React.FC = () => {
                         >
                           <td className="px-6 py-4">
                             <img
-                              src={p.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.full_name)}`}
+                              src={getSafeMediaUrl(p.avatar_url) || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.full_name)}`}
                               alt={p.full_name}
                               className="h-10 w-10 rounded-full border bg-background"
                             />
