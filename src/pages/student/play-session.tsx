@@ -35,6 +35,7 @@ export const PlaySession: React.FC = () => {
     submitAnswer,
     leaveSession,
     joinSession,
+    error: playError,
     // New self-paced properties/methods
     questions,
     currentQuestionIndex,
@@ -131,6 +132,9 @@ export const PlaySession: React.FC = () => {
         setSelectedOptionIds([]);
         setMatchingAnswers({});
       }
+
+      // Hide feedback popup for the new question
+      setShowFeedback(false);
       
       if (currentQuestion.question_type === 'matching' && currentOptions) {
         const matches = currentOptions
@@ -580,6 +584,32 @@ export const PlaySession: React.FC = () => {
         <div className="text-center space-y-4">
           <div className="h-10 w-10 animate-spin border-4 border-primary border-t-transparent rounded-full mx-auto" />
           <p className="text-sm text-muted-foreground font-semibold">Menghubungkan ke server kuis SINESA...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Error Screen
+  if (playError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-mesh p-4">
+        <div className="glass-panel p-6 rounded-3xl max-w-md w-full border border-destructive/25 space-y-4 text-center shadow-xl">
+          <div className="h-12 w-12 bg-destructive/10 border border-destructive/30 rounded-full flex items-center justify-center mx-auto text-destructive">
+            <AlertCircle className="h-6 w-6" />
+          </div>
+          <h3 className="text-lg font-bold text-foreground">Gagal Menghubungkan</h3>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {playError}
+          </p>
+          <button
+            onClick={() => {
+              leaveSession();
+              navigate('/student/dashboard');
+            }}
+            className="w-full py-3 bg-foreground text-background font-black rounded-xl text-xs hover:opacity-90 active:scale-95 transition-all shadow-md"
+          >
+            Kembali ke Dashboard
+          </button>
         </div>
       </div>
     );

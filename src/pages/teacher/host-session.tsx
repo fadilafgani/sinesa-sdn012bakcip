@@ -178,6 +178,11 @@ export const HostSession: React.FC = () => {
     
     const fetchLatest = async () => {
       try {
+        // Auto-refresh token if expired
+        try {
+          await supabase.auth.getSession();
+        } catch (e) {}
+
         const currentStatus = useHostStore.getState().activeSession?.status;
         console.log('HostSession polling: fetching data. Status =', currentStatus);
         

@@ -178,6 +178,13 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
         // Supabase Flow
         try {
+          // Auto-refresh token if expired
+          try {
+            await supabase.auth.getSession();
+          } catch (e) {
+            console.warn('Failed to refresh session:', e);
+          }
+
           const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           // 1. Get quiz by pin
           let { data: quizData, error: quizErr } = await supabase
@@ -524,6 +531,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     listenToSession: (sessionId: string) => {
       const isMock = checkIsMock();
 
+      // Cleanly terminate any active listeners first to prevent duplicates/leaks
+      get().stopListening();
+
       if (isMock) {
         const intervalId = window.setInterval(() => {
           const sessKey = `session_${sessionId}`;
@@ -588,6 +598,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
       // Start a fallback polling interval (every 2 seconds) in case Supabase Realtime fails in production
       const intervalId = window.setInterval(async () => {
         try {
+          // Auto-refresh token if expired
+          try {
+            await supabase.auth.getSession();
+          } catch (e) {}
+
           const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: latestSess, error } = await supabase
             .from('quiz_sessions')

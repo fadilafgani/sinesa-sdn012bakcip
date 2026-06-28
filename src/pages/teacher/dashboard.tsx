@@ -181,6 +181,14 @@ export const TeacherDashboard: React.FC = () => {
 
     try {
       console.log('TeacherDashboard: fetchQuizzes starting, profile id =', profile?.id);
+      
+      // Auto-refresh token if expired
+      try {
+        await supabase.auth.getSession();
+      } catch (e) {
+        console.warn('Failed to refresh session:', e);
+      }
+
       const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
       const { data, error } = await supabase
         .from('quizzes')

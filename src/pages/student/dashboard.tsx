@@ -259,6 +259,13 @@ export const StudentDashboard: React.FC = () => {
 
       setLoadingHistory(true);
       try {
+        // Auto-refresh token if expired
+        try {
+          await supabase.auth.getSession();
+        } catch (e) {
+          console.warn('Failed to refresh session:', e);
+        }
+
         const { data, error } = await supabase
           .from('participants')
           .select(`
