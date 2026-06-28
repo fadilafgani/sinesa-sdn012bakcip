@@ -1391,7 +1391,7 @@ export const QuizEditor: React.FC = () => {
                     <div className="flex flex-col justify-center border-l pl-4">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase">Pemutar Audio</span>
                       {currentWatchedQuestion?.media_url ? (
-                        <audio controls src={getSafeMediaUrl(currentWatchedQuestion.media_url)} className="mt-2 w-full max-h-10" />
+                        <audio key={currentWatchedQuestion.media_url} controls src={getSafeMediaUrl(currentWatchedQuestion.media_url)} className="mt-2 w-full max-h-10" />
                       ) : (
                         <span className="text-xs text-muted-foreground italic mt-2">Audio belum diupload</span>
                       )}
@@ -1433,7 +1433,7 @@ export const QuizEditor: React.FC = () => {
                     <div className="flex flex-col justify-center border-l pl-4">
                       <span className="text-[10px] font-bold text-muted-foreground uppercase">Pemutar Video</span>
                       {currentWatchedQuestion?.media_url ? (
-                        <video controls src={getSafeMediaUrl(currentWatchedQuestion.media_url)} className="mt-2 w-full max-h-32 rounded-xl border bg-background" />
+                        <video key={currentWatchedQuestion.media_url} controls src={getSafeMediaUrl(currentWatchedQuestion.media_url)} className="mt-2 w-full max-h-32 rounded-xl border bg-background" />
                       ) : (
                         <span className="text-xs text-muted-foreground italic mt-2">Video belum diupload</span>
                       )}

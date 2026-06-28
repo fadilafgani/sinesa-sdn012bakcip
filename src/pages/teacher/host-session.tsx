@@ -548,12 +548,12 @@ export const HostSession: React.FC = () => {
             {currentQuestion.media_type === 'audio' && (
               <div className="flex items-center gap-3 py-6">
                 <Volume2 className="h-8 w-8 text-primary animate-pulse" />
-                <audio controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay />
+                <audio key={currentQuestion.media_url} controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay />
               </div>
             )}
             {currentQuestion.media_type === 'video' && (
               <div className="flex items-center justify-center max-h-[250px] w-full">
-                <video controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay className="max-h-[250px] rounded-2xl border bg-black" />
+                <video key={currentQuestion.media_url} controls src={getSafeMediaUrl(currentQuestion.media_url)} autoPlay className="max-h-[250px] rounded-2xl border bg-black" />
               </div>
             )}
             {currentQuestion.media_type === 'latex' && (

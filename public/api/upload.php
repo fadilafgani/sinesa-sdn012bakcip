@@ -219,6 +219,7 @@ if ($action === 'upload') {
                 $new_filename = $webp_filename;
                 $dest_path = $webp_dest;
                 $converted_webp = true;
+                @chmod($dest_path, 0644);
             }
             imagedestroy($img);
         }
@@ -229,6 +230,7 @@ if ($action === 'upload') {
         if (!move_uploaded_file($tmp_name, $dest_path)) {
             send_error('Gagal menyimpan file di server.', 500);
         }
+        @chmod($dest_path, 0644);
     }
 
     // Return success url

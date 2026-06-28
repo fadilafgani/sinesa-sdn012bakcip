@@ -19,3 +19,20 @@
   php_value memory_limit 128M
 </IfModule>
 
+# Force correct mime-types for media files
+<IfModule mod_mime.c>
+  AddType video/mp4 .mp4
+  AddType video/webm .webm
+  AddType audio/mpeg .mp3
+  AddType audio/ogg .ogg
+  AddType audio/wav .wav
+</IfModule>
+
+# Enable CORS for media files if requested cross-origin
+<FilesMatch "\.(mp4|webm|mp3|ogg|wav|webp|png|jpg|jpeg|gif)$">
+  <IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+  </IfModule>
+</FilesMatch>
+
+
