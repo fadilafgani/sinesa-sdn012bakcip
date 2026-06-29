@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
 
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
+
 interface PlayState {
   session: QuizSession | null;
   quiz: Quiz | null;
@@ -15,6 +17,7 @@ interface PlayState {
   loading: boolean;
   error: string | null;
   pollingInterval: number | null;
+  serverTimeOffset: number; // localTime - serverTime
 
   // Self-paced quiz mode state
   questions: Question[];
@@ -60,6 +63,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
     loading: false,
     error: null,
     pollingInterval: null,
+    serverTimeOffset: 0,
 
     // Self-paced defaults
     questions: [],
@@ -183,6 +187,23 @@ export const usePlayStore = create<PlayState>((set, get) => {
             await supabase.auth.getSession();
           } catch (e) {
             console.warn('Failed to refresh session:', e);
+          }
+
+          // Measure clock drift relative to Supabase API server
+          try {
+            const startFetch = Date.now();
+            const res = await fetch(supabaseUrl + '/rest/v1/', { method: 'GET' });
+            const serverDateHeader = res.headers.get('date');
+            if (serverDateHeader) {
+              const serverTime = new Date(serverDateHeader).getTime();
+              // Adjust for half-trip network latency
+              const roundTrip = Date.now() - startFetch;
+              const adjustedServerTime = serverTime + roundTrip / 2;
+              set({ serverTimeOffset: Date.now() - adjustedServerTime });
+              console.log('play-store clock drift measured:', Date.now() - adjustedServerTime, 'ms');
+            }
+          } catch (e) {
+            console.warn('Failed to calculate server clock offset:', e);
           }
 
           const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
@@ -406,6 +427,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     submitAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session } = get();
       if (!session) return;
       
@@ -611,6 +635,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
             .neq('id', cacheBuster)
             .single();
 
+          if (error) {
+            console.error('play-store polling fallback query error:', error);
+          }
           if (!error && latestSess) {
             const previousSess = get().session;
             const indexChanged = previousSess?.current_question_index !== latestSess.current_question_index;
@@ -739,6 +766,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     // ==========================================
 
     setQuestionProgress: async (index: number) => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { questions, participant, answersMap, session } = get();
       if (!session || !participant || index < 0 || index >= questions.length) return;
 
@@ -804,6 +834,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     skipQuestion: async (questionId: string) => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session, participant, questionStatus, skippedQuestions, currentQuestionIndex, questions } = get();
       if (!session || !participant) return;
 
@@ -847,6 +880,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     submitSelfPacedAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session, participant, currentQuestion, currentOptions, hasAnswered, questionStatus, answersMap, questionStartedAt } = get();
       if (!session || !participant || !currentQuestion || hasAnswered) return;
 
@@ -969,6 +1005,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     submitFinalQuiz: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session, participant } = get();
       if (!session || !participant) return;
 
@@ -1003,6 +1042,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     fetchLeaderboard: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session } = get();
       if (!session) return [];
       const isMock = checkIsMock();
@@ -1027,6 +1069,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     fetchQuestionStats: async (questionId: string) => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { session } = get();
       if (!session) return null;
       const isMock = checkIsMock();
@@ -1073,6 +1118,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
     },
 
     incrementViolation: async () => {
+        // Auto-refresh token if expired
+        try { await supabase.auth.getSession(); } catch (e) {}
+
         const { session, participant } = get();
         if (!session || !participant) return;
 

@@ -425,9 +425,11 @@ export const PlaySession: React.FC = () => {
       
       // If host-paced legacy mode, sync with question_expires_at
       if (!isSelfPaced) {
-        const expiresAt = session.question_expires_at ? new Date(session.question_expires_at).getTime() : Date.now() + 30000;
+        const offset = usePlayStore.getState().serverTimeOffset;
+        const expiresAt = session.question_expires_at ? new Date(session.question_expires_at).getTime() : (Date.now() - offset) + 30000;
         const updateLegacyTimer = () => {
-          const diff = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
+          const serverNow = Date.now() - offset;
+          const diff = Math.max(0, Math.round((expiresAt - serverNow) / 1000));
           setLocalTimer(diff);
           if (diff <= 0) {
             setShowFeedback(true);

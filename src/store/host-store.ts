@@ -299,6 +299,9 @@ export const useHostStore = create<HostState>((set, get) => {
         return;
       }
 
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const { error } = await supabase
         .from('quiz_sessions')
         .update({ status: 'active', current_question_index: -1 })
@@ -316,6 +319,9 @@ export const useHostStore = create<HostState>((set, get) => {
     },
 
     nextQuestion: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const session = get().activeSession;
       if (!session) {
         throw new Error('Sesi kuis tidak aktif atau tidak ditemukan.');
@@ -475,6 +481,9 @@ export const useHostStore = create<HostState>((set, get) => {
     },
 
     endQuiz: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const session = get().activeSession;
       if (!session) return;
 
@@ -503,6 +512,9 @@ export const useHostStore = create<HostState>((set, get) => {
     },
 
     revealAnswer: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       const session = get().activeSession;
       if (!session) return;
 
@@ -552,6 +564,9 @@ export const useHostStore = create<HostState>((set, get) => {
         set({ questions: rawQs });
         return rawQs;
       }
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
       try {
         const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
         const { data, error } = await supabase
@@ -573,6 +588,9 @@ export const useHostStore = create<HostState>((set, get) => {
     fetchParticipants: async (sessionId: string) => {
       const isMock = checkIsMock();
       if (isMock) return;
+
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
 
       try {
         const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
@@ -603,6 +621,9 @@ export const useHostStore = create<HostState>((set, get) => {
 
       const currentQuestion = get().currentQuestion;
       if (!currentQuestion) return;
+
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
 
       try {
         const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');

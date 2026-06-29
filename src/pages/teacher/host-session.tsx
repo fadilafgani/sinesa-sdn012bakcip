@@ -92,6 +92,9 @@ export const HostSession: React.FC = () => {
         }
       } else {
         try {
+          try {
+            await supabase.auth.getSession();
+          } catch (e) {}
           const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: quizData } = await supabase
             .from('quizzes')
