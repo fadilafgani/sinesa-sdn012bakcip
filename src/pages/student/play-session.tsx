@@ -73,6 +73,7 @@ export const PlaySession: React.FC = () => {
   const selectedOptionIdsRef = useRef<string[]>([]);
   const matchingAnswersRef = useRef<Record<string, string>>({});
   const timerIntervalRef = useRef<number | null>(null);
+  const rejoinAttempted = useRef(false);
 
   // Zoom Media State
   const [zoomImage, setZoomImage] = useState<string | null>(null);
@@ -157,7 +158,8 @@ export const PlaySession: React.FC = () => {
 
   // Auto-Rejoin Session on page refresh
   useEffect(() => {
-    if (!session && !loading && pin && name) {
+    if (!rejoinAttempted.current && !session && !loading && pin && name) {
+      rejoinAttempted.current = true;
       joinSession(pin, name, profile?.id);
     }
   }, [session, loading, pin, name, profile?.id]);
