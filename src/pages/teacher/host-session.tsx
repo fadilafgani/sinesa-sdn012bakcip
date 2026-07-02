@@ -12,6 +12,7 @@ import { showConfirm, showError } from '../../lib/swal';
 import { supabase } from '../../lib/supabase';
 import { LazyImage } from '../../components/lazy-image';
 import { getSafeMediaUrl } from '../../lib/media';
+import type { QuizSession, Option } from '../../types';
 
 export const HostSession: React.FC = () => {
   const navigate = useNavigate();
@@ -185,6 +186,43 @@ export const HostSession: React.FC = () => {
         try {
           await supabase.auth.getSession();
         } catch (e) {}
+
+        // Fetch latest session row to sync state drifts
+        const cacheBusterSess = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+        const { data: latestSess } = await supabase
+          .from('quiz_sessions')
+          .select('*')
+          .eq('id', sessionId)
+          .neq('id', cacheBusterSess)
+          .single();
+
+        if (latestSess) {
+          const localSess = useHostStore.getState().activeSession;
+          if (localSess && (localSess.status !== latestSess.status || localSess.current_question_index !== latestSess.current_question_index)) {
+            console.log('HostSession polling: syncing session state with database', latestSess);
+            
+            let activeQuestion = null;
+            let activeOptions: Option[] = [];
+            const questions = useHostStore.getState().questions;
+            
+            if (latestSess.status === 'active' && latestSess.current_question_index >= 0) {
+              if (questions[latestSess.current_question_index]) {
+                activeQuestion = questions[latestSess.current_question_index];
+                const { data: optionsData } = await supabase
+                  .from('options')
+                  .select('*')
+                  .eq('question_id', activeQuestion.id);
+                activeOptions = (optionsData as Option[]) || [];
+              }
+            }
+
+            useHostStore.setState({ 
+              activeSession: latestSess as QuizSession,
+              currentQuestion: activeQuestion,
+              currentOptions: activeOptions
+            });
+          }
+        }
 
         const currentStatus = useHostStore.getState().activeSession?.status;
         console.log('HostSession polling: fetching data. Status =', currentStatus);

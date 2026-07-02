@@ -156,10 +156,14 @@ export const PlaySession: React.FC = () => {
     return () => unsubscribe();
   }, [session?.id, isMock]);
 
-  // Auto-Rejoin Session on page refresh
+  // Auto-Rejoin Session on page refresh (runs exactly once on mount if pin/name present)
   useEffect(() => {
-    if (!rejoinAttempted.current && !session && !loading && pin && name) {
-      rejoinAttempted.current = true;
+    if (!pin || !name) return;
+    if (rejoinAttempted.current) return;
+
+    rejoinAttempted.current = true;
+    if (!session && !loading) {
+      console.log('play-session: Auto-rejoining session for', name);
       joinSession(pin, name, profile?.id);
     }
   }, [session, loading, pin, name, profile?.id]);

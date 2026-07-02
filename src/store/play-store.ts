@@ -642,10 +642,57 @@ export const usePlayStore = create<PlayState>((set, get) => {
             const previousSess = get().session;
             const indexChanged = previousSess?.current_question_index !== latestSess.current_question_index;
             const statusChanged = previousSess?.status !== latestSess.status;
+            const activeButNoQuestion = latestSess.status === 'active' && get().currentQuestion === null;
             
-            if (statusChanged || indexChanged) {
-              console.log('play-store polling fallback: session updated', latestSess);
+            if (statusChanged || indexChanged || activeButNoQuestion) {
+              console.log('play-store polling fallback: session updated/healed', latestSess);
               await get().handleSessionUpdate(latestSess as QuizSession);
+            }
+
+            // Self-paced participant state healing
+            if (latestSess.status === 'active') {
+              const part = get().participant;
+              if (part) {
+                const { data: latestPart } = await supabase
+                  .from('participants')
+                  .select('*')
+                  .eq('id', part.id)
+                  .single();
+                  
+                if (latestPart) {
+                  const progressDiff = latestPart.current_progress !== get().currentQuestionIndex;
+                  const livesDiff = latestPart.lives !== get().lives;
+                  const completionDiff = latestPart.is_completed !== get().isCompleted;
+
+                  if (progressDiff || livesDiff || completionDiff) {
+                    console.log('play-store polling fallback: healing participant state', latestPart);
+                    
+                    // Re-sync answers map to get latest correct answers
+                    const { data: answersData } = await supabase
+                      .from('answers')
+                      .select('*')
+                      .eq('participant_id', part.id);
+                    
+                    const map: Record<string, Answer> = {};
+                    if (answersData) {
+                      answersData.forEach((a: any) => {
+                        map[a.question_id] = a as Answer;
+                      });
+                    }
+
+                    set({
+                      participant: latestPart as Participant,
+                      lives: latestPart.lives !== undefined && latestPart.lives !== null ? latestPart.lives : get().lives,
+                      isCompleted: latestPart.is_completed || false,
+                      answersMap: map
+                    });
+
+                    if (progressDiff) {
+                      await get().setQuestionProgress(latestPart.current_progress || 0);
+                    }
+                  }
+                }
+              }
             }
           }
         } catch (err) {
