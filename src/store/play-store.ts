@@ -433,12 +433,6 @@ export const usePlayStore = create<PlayState>((set, get) => {
       const { session } = get();
       if (!session) return;
       
-      const isSelfPaced = session.quiz_mode === 'serius' || session.quiz_mode === 'santai';
-      if (isSelfPaced) {
-        await get().submitSelfPacedAnswer(arg);
-        return;
-      }
-
       // Legacy Realtime Host-paced flow
       const { participant, currentQuestion, currentOptions, hasAnswered } = get();
       if (!participant || !currentQuestion || hasAnswered) return;
@@ -453,9 +447,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
       if (typeof arg === 'string') {
         const option = currentOptions.find(o => o.id === arg);
-        if (!option) return;
-        isCorrect = option.is_correct;
-        optionIdToSave = arg;
+        if (option) {
+          isCorrect = option.is_correct;
+          optionIdToSave = arg;
+        }
       } else {
         if (qType === 'multiple_answer') {
           const selectedIds = arg.optionIds || [];
@@ -469,9 +464,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
         } else {
           const optId = arg.optionId || '';
           const option = currentOptions.find(o => o.id === optId);
-          if (!option) return;
-          isCorrect = option.is_correct;
-          optionIdToSave = optId;
+          if (option) {
+            isCorrect = option.is_correct;
+            optionIdToSave = optId;
+          }
         }
       }
 
@@ -481,11 +477,14 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
       const scoreAwarded = isCorrect ? currentQuestion.points : 0;
 
-      set({
-        hasAnswered: true,
-        isAnswerCorrect: isCorrect,
-        scoreAwarded,
-      });
+      // Handle Lives in Santai mode
+      let newLives = get().lives;
+      const initialLives = get().quiz?.lives_count ?? 3;
+      if (!isCorrect && session.quiz_mode === 'santai' && initialLives > 0) {
+        newLives = Math.max(0, newLives - 1);
+      }
+
+      const updatedStatuses = { ...get().questionStatus, [currentQuestion.id]: 'answered' as const };
 
       if (isMock) {
         const answersKey = `answers_${session.id}`;
@@ -505,13 +504,26 @@ export const usePlayStore = create<PlayState>((set, get) => {
         localStorage.setItem(answersKey, JSON.stringify([...answers, newAnswer]));
 
         const newScore = participant.score + scoreAwarded;
-        const updatedPart = { ...participant, score: newScore };
-        set({ participant: updatedPart });
+        const updatedPart = {
+          ...participant,
+          score: newScore,
+          lives: newLives,
+          question_status: updatedStatuses
+        };
 
         const partsKey = `participants_${session.id}`;
         const parts = JSON.parse(localStorage.getItem(partsKey) || '[]');
         const updatedParts = parts.map((p: any) => p.id === participant.id ? updatedPart : p);
         localStorage.setItem(partsKey, JSON.stringify(updatedParts));
+
+        set({
+          participant: updatedPart,
+          lives: newLives,
+          questionStatus: updatedStatuses,
+          hasAnswered: true,
+          isAnswerCorrect: isCorrect,
+          scoreAwarded,
+        });
         return;
       }
 
@@ -534,13 +546,24 @@ export const usePlayStore = create<PlayState>((set, get) => {
         const newScore = participant.score + scoreAwarded;
         const { data: updatedPart } = await supabase
           .from('participants')
-          .update({ score: newScore })
+          .update({
+            score: newScore,
+            lives: newLives,
+            question_status: updatedStatuses
+          })
           .eq('id', participant.id)
           .select()
           .single();
 
         if (updatedPart) {
-          set({ participant: updatedPart as Participant });
+          set({
+            participant: updatedPart as Participant,
+            lives: newLives,
+            questionStatus: updatedStatuses,
+            hasAnswered: true,
+            isAnswerCorrect: isCorrect,
+            scoreAwarded,
+          });
         }
       } catch (err: any) {
         console.error('Error submitting answer:', err);
@@ -642,9 +665,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
             const previousSess = get().session;
             const indexChanged = previousSess?.current_question_index !== latestSess.current_question_index;
             const statusChanged = previousSess?.status !== latestSess.status;
+            const stageChanged = previousSess?.current_stage !== latestSess.current_stage;
             const activeButNoQuestion = latestSess.status === 'active' && get().currentQuestion === null;
             
-            if (statusChanged || indexChanged || activeButNoQuestion) {
+            if (statusChanged || indexChanged || stageChanged || activeButNoQuestion) {
               console.log('play-store polling fallback: session updated/healed', latestSess);
               await get().handleSessionUpdate(latestSess as QuizSession);
             }
@@ -660,11 +684,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
                   .single();
                   
                 if (latestPart) {
-                  const progressDiff = latestPart.current_progress !== get().currentQuestionIndex;
                   const livesDiff = latestPart.lives !== get().lives;
                   const completionDiff = latestPart.is_completed !== get().isCompleted;
 
-                  if (progressDiff || livesDiff || completionDiff) {
+                  if (livesDiff || completionDiff) {
                     console.log('play-store polling fallback: healing participant state', latestPart);
                     
                     // Re-sync answers map to get latest correct answers
@@ -686,10 +709,6 @@ export const usePlayStore = create<PlayState>((set, get) => {
                       isCompleted: latestPart.is_completed || false,
                       answersMap: map
                     });
-
-                    if (progressDiff) {
-                      await get().setQuestionProgress(latestPart.current_progress || 0);
-                    }
                   }
                 }
               }
@@ -739,72 +758,78 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     handleSessionUpdate: async (updatedSess: QuizSession) => {
       const previousSess = get().session;
-      const isSelfPaced = updatedSess.quiz_mode === 'serius' || updatedSess.quiz_mode === 'santai';
-
       set({ session: updatedSess });
 
-      if (updatedSess.status === 'completed') {
+      if (updatedSess.status === 'completed' || updatedSess.current_stage === 'finished') {
         get().stopListening();
         set({ isCompleted: true });
         return;
       }
 
-      // If we are in self-paced mode, we don't automatically follow the host index
-      if (isSelfPaced) {
-        // If transitioning from lobby to active, ensure questions are loaded
-        if (updatedSess.status === 'active' && (!previousSess || previousSess.status === 'lobby')) {
-          const participant = get().participant;
-          if (participant) {
-            await get().setQuestionProgress(participant.current_progress || 0);
+      // If current_question_index is valid, ensure the question and options are loaded
+      if (updatedSess.current_question_index >= 0) {
+        const questionIdxChanged = !previousSess || previousSess.current_question_index !== updatedSess.current_question_index || get().currentQuestion === null;
+
+        if (questionIdxChanged) {
+          try {
+            let questions = get().questions;
+            if (!questions || questions.length === 0) {
+              const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+              const { data: questionsData, error: qsErr } = await supabase
+                .from('questions')
+                .select('*')
+                .eq('quiz_id', updatedSess.quiz_id)
+                .neq('id', cacheBusterQs)
+                .order('order_index', { ascending: true });
+              if (qsErr) throw qsErr;
+              questions = (questionsData as Question[]) || [];
+              set({ questions });
+            }
+
+            if (questions && questions[updatedSess.current_question_index]) {
+              const nextQuestion = questions[updatedSess.current_question_index] as Question;
+
+              const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+              const { data: options, error: optsErr } = await supabase
+                .from('options')
+                .select('*')
+                .eq('question_id', nextQuestion.id)
+                .neq('id', cacheBusterOpts);
+              if (optsErr) throw optsErr;
+
+              // Check if already answered (important for rejoin/recovery)
+              const existingAnswer = get().answersMap[nextQuestion.id];
+              const hasAns = !!existingAnswer;
+
+              set({
+                currentQuestionIndex: updatedSess.current_question_index,
+                currentQuestion: nextQuestion,
+                currentOptions: (options as Option[]) || [],
+                hasAnswered: hasAns,
+                isAnswerCorrect: hasAns ? existingAnswer.is_correct : null,
+                scoreAwarded: hasAns ? existingAnswer.score_awarded : 0,
+              });
+            }
+          } catch (err) {
+            console.error('Error handling session update gameplay progress:', err);
           }
         }
-        return;
       }
 
-      // Legacy host-paced logic
-      if (updatedSess.current_question_index >= 0 && 
-          (!previousSess || 
-           previousSess.current_question_index !== updatedSess.current_question_index ||
-           get().currentQuestion === null)) {
-         
-         try {
-           let questions = get().questions;
-           if (!questions || questions.length === 0) {
-             const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-             const { data: questionsData, error: qsErr } = await supabase
-               .from('questions')
-               .select('*')
-               .eq('quiz_id', updatedSess.quiz_id)
-               .neq('id', cacheBusterQs)
-               .order('order_index', { ascending: true });
-             if (qsErr) throw qsErr;
-             questions = (questionsData as Question[]) || [];
-             set({ questions });
-           }
-
-           if (questions && questions[updatedSess.current_question_index]) {
-             const nextQuestion = questions[updatedSess.current_question_index] as Question;
-
-             const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-             const { data: options, error: optsErr } = await supabase
-               .from('options')
-               .select('*')
-               .eq('question_id', nextQuestion.id)
-               .neq('id', cacheBusterOpts);
-             if (optsErr) throw optsErr;
-
-             set({
-               currentQuestionIndex: updatedSess.current_question_index,
-               currentQuestion: nextQuestion,
-               currentOptions: (options as Option[]) || [],
-               hasAnswered: false,
-               isAnswerCorrect: null,
-               scoreAwarded: 0,
-             });
-           }
-         } catch (err) {
-           console.error('Error handling session update gameplay progress:', err);
-         }
+      // Handle specific stage transitions
+      if (updatedSess.current_stage === 'question_result') {
+        // If student hasn't answered yet, force submission
+        if (!get().hasAnswered && get().currentQuestion) {
+          console.log('handleSessionUpdate: student has not answered, forcing auto-submit');
+          const qType = get().currentQuestion?.question_type || 'multiple_choice';
+          if (qType === 'multiple_answer') {
+            await get().submitAnswer({ optionIds: [] });
+          } else if (qType === 'matching') {
+            await get().submitAnswer({ matchingAnswers: {} });
+          } else {
+            await get().submitAnswer('');
+          }
+        }
       }
     },
 

@@ -202,6 +202,7 @@ export const AdminDashboard: React.FC = () => {
           quiz_id: 'quiz-1',
           host_id: 'mock-uuid-teacher',
           status: 'lobby',
+          current_stage: 'waiting',
           current_question_index: -1,
           question_started_at: null,
           question_expires_at: null,

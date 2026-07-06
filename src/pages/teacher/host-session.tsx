@@ -5,7 +5,7 @@ import { useAuthStore } from '../../store/auth-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
-import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Heart, Copy, Check } from 'lucide-react';
+import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check } from 'lucide-react';
 import { LatexRenderer } from '../../components/latex-renderer';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError } from '../../lib/swal';
@@ -40,8 +40,7 @@ export const HostSession: React.FC = () => {
 
   const [pinCode, setPinCode] = useState<string>('');
   const [timer, setTimer] = useState<number>(0);
-  const [showAnswerState, setShowAnswerState] = useState<boolean>(false);
-  const [showLeaderboardState, setShowLeaderboardState] = useState<boolean>(false);
+  const [countdownTimer, setCountdownTimer] = useState<number>(3);
   const [copied, setCopied] = useState<boolean>(false);
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false);
   
@@ -261,9 +260,28 @@ export const HostSession: React.FC = () => {
     };
   }, [activeSession?.id, isMock, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
 
-  // Handle countdown timers
+  // Manage countdown automatically
   useEffect(() => {
-    if (activeSession?.status === 'active' && currentQuestion && !showAnswerState && !showLeaderboardState) {
+    if (activeSession?.current_stage === 'countdown') {
+      setCountdownTimer(3);
+      const countdownInterval = setInterval(() => {
+        setCountdownTimer(prev => {
+          if (prev <= 1) {
+            clearInterval(countdownInterval);
+            // Transition to question stage in DB
+            useHostStore.getState().publishQuestionStage();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(countdownInterval);
+    }
+  }, [activeSession?.current_stage, activeSession?.current_question_index]);
+
+  // Handle gameplay question timer
+  useEffect(() => {
+    if (activeSession?.current_stage === 'question' && currentQuestion) {
       const expiresAt = activeSession.question_expires_at ? new Date(activeSession.question_expires_at).getTime() : Date.now() + 30000;
       
       const updateTimer = () => {
@@ -292,11 +310,10 @@ export const HostSession: React.FC = () => {
         timerRef.current = null;
       }
     };
-  }, [activeSession?.current_question_index, activeSession?.status, currentQuestion, showAnswerState, showLeaderboardState]);
+  }, [activeSession?.current_question_index, activeSession?.current_stage, currentQuestion]);
 
-  // Reveal correct answer and display bar chart
+  // Reveal correct answer
   const handleRevealAnswer = async () => {
-    setShowAnswerState(true);
     if (timerRef.current) clearInterval(timerRef.current);
     try {
       await useHostStore.getState().revealAnswer();
@@ -342,11 +359,6 @@ export const HostSession: React.FC = () => {
     try {
       console.log('HostSession: calling startQuiz()...');
       await startQuiz();
-      console.log('HostSession: calling nextQuestion()...');
-      await nextQuestion();
-      console.log('HostSession: nextQuestion() successfully executed');
-      setShowAnswerState(false);
-      setShowLeaderboardState(false);
     } catch (err: any) {
       console.error('HostSession: Error starting game:', err);
       showError('Gagal', `Gagal memulai kuis: ${err.message || err}`);
@@ -356,8 +368,12 @@ export const HostSession: React.FC = () => {
   };
 
   // Progress to showing leaderboard
-  const handleShowLeaderboard = () => {
-    setShowLeaderboardState(true);
+  const handleShowLeaderboard = async () => {
+    try {
+      await useHostStore.getState().showLeaderboard();
+    } catch (err) {
+      console.error('Error showing leaderboard in DB:', err);
+    }
   };
 
   // Progress to next question or end quiz
@@ -376,8 +392,6 @@ export const HostSession: React.FC = () => {
       console.log('HostSession: loading next question...');
       try {
         await nextQuestion();
-        setShowAnswerState(false);
-        setShowLeaderboardState(false);
       } catch (err: any) {
         console.error('HostSession: Failed to load next question:', err);
         showError('Gagal', `Gagal memuat soal berikutnya: ${err.message || err}`);
@@ -619,7 +633,7 @@ export const HostSession: React.FC = () => {
             </span>
           </div>
 
-          {!showAnswerState ? (
+          {activeSession!.current_stage === 'question' ? (
             <button
               onClick={handleRevealAnswer}
               className="rounded-xl bg-primary text-primary-foreground font-bold px-5 py-2.5 text-xs shadow hover:bg-primary/95 transition"
@@ -641,14 +655,14 @@ export const HostSession: React.FC = () => {
           <div className="space-y-4 max-w-2xl mx-auto">
             <div className="bg-card p-6 rounded-3xl border border-border space-y-3">
               <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                {showAnswerState ? 'Kunci Pasangan Pencocokan' : 'Daftar Item Pencocokan'}
+                {activeSession!.current_stage === 'question_result' ? 'Kunci Pasangan Pencocokan' : 'Daftar Item Pencocokan'}
               </h3>
               
               {currentOptions.map((opt, idx) => (
                 <div 
                   key={opt.id}
                   className={`flex items-center justify-between p-4 rounded-2xl border transition duration-300 ${
-                    showAnswerState 
+                    activeSession!.current_stage === 'question_result' 
                       ? 'border-green-500 bg-green-500/10 text-green-750 dark:text-green-400 font-extrabold' 
                       : 'border-border bg-background/50 font-bold'
                   }`}
@@ -663,9 +677,9 @@ export const HostSession: React.FC = () => {
                   <div className="flex items-center gap-3">
                     <span className="text-muted-foreground text-xs font-semibold">🔗 dipasangkan dengan</span>
                     <span className={`px-4 py-2 rounded-xl border text-xs font-black ${
-                      showAnswerState ? 'bg-green-600 text-white border-transparent' : 'bg-muted text-muted-foreground'
+                      activeSession!.current_stage === 'question_result' ? 'bg-green-600 text-white border-transparent' : 'bg-muted text-muted-foreground'
                     }`}>
-                      {showAnswerState ? opt.match_text : '??'}
+                      {activeSession!.current_stage === 'question_result' ? opt.match_text : '??'}
                     </span>
                   </div>
                 </div>
@@ -683,7 +697,7 @@ export const HostSession: React.FC = () => {
                 baseColor = isTrue ? 'bg-blue-600' : 'bg-red-600';
               }
 
-              const optionColor = showAnswerState 
+              const optionColor = activeSession!.current_stage === 'question_result' 
                 ? isCorrect ? 'bg-green-600 border-green-700 shadow-md scale-[1.01]' : 'opacity-40 bg-zinc-400' 
                 : baseColor;
 
@@ -720,7 +734,7 @@ export const HostSession: React.FC = () => {
         )}
 
         {/* Answer Distribution Graph via Recharts */}
-        {showAnswerState && currentQuestion.question_type !== 'matching' && (
+        {activeSession!.current_stage === 'question_result' && currentQuestion.question_type !== 'matching' && (
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
@@ -926,150 +940,32 @@ export const HostSession: React.FC = () => {
     );
   };
 
-  const renderSelfPacedDashboard = () => {
-    const sortedParticipants = [...participants].sort((a, b) => b.score - a.score);
-    return (
-      <div className="space-y-6 max-w-5xl mx-auto py-4">
-        {/* Dashboard Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between border-b pb-4 gap-4">
-          <div>
-            <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-black uppercase border mb-2 ${
-              activeSession!.quiz_mode === 'santai' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
-            }`}>
-              {activeSession!.quiz_mode === 'santai' ? '🕹️ Mode Santai / Adventure' : '🔒 Mode Serius (Ujian)'}
-            </span>
-            <h2 className="text-3xl font-black text-foreground">Pemantauan Progres Siswa</h2>
-            <p className="text-xs text-muted-foreground mt-0.5 uppercase font-bold">
-              {participants.length} Siswa Mengerjakan Mandiri
-            </p>
-          </div>
 
-          <button
-            onClick={async () => {
-              const confirmRes = await showConfirm(
-                'Selesaikan Kuis',
-                'Apakah Anda yakin ingin menyelesaikan kuis ini secara paksa untuk seluruh siswa?',
-                'Ya, Selesaikan',
-                'Batal'
-              );
-              if (confirmRes.isConfirmed) {
-                await endQuiz();
-                triggerConfetti();
-              }
-            }}
-            className="flex items-center gap-2 rounded-2xl bg-destructive text-destructive-foreground px-6 py-4 font-bold text-sm shadow-lg shadow-destructive/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
-          >
-            Selesaikan Kuis
-          </button>
-        </div>
+  const renderCountdown = () => (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-4">
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        className="glass-panel p-12 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-primary/20 flex flex-col items-center justify-center"
+      >
+        <span className="text-xs uppercase font-bold text-muted-foreground tracking-widest block mb-2 animate-pulse">
+          Persiapan Soal {activeSession!.current_question_index + 1}
+        </span>
+        <motion.div
+          key={countdownTimer}
+          initial={{ scale: 0.5, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 1.5, opacity: 0 }}
+          transition={{ duration: 0.5 }}
+          className="text-8xl font-black text-primary font-mono"
+        >
+          {countdownTimer}
+        </motion.div>
+        <p className="text-sm text-foreground font-semibold">Harap bersiap!</p>
+      </motion.div>
+    </div>
+  );
 
-        {/* Live Grid of student progress */}
-        {sortedParticipants.length === 0 ? (
-          <div className="text-center p-16 glass-panel rounded-3xl border border-dashed text-muted-foreground italic">
-            Menunggu siswa memulai pengerjaan kuis...
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {sortedParticipants.map((p, idx) => {
-              const qStatus = p.question_status || {};
-              const answeredCount = Object.values(qStatus).filter(s => s === 'answered').length;
-              const skippedCount = Object.values(qStatus).filter(s => s === 'skipped').length;
-              const isFinished = p.is_completed || (answeredCount + skippedCount === questions.length) || (activeSession!.quiz_mode === 'santai' && activeSession!.lives_count > 0 && p.lives === 0);
-
-              return (
-                <motion.div
-                  key={p.id}
-                  layout
-                  className={`glass-panel p-5 rounded-3xl border flex flex-col justify-between transition-all duration-300 ${
-                    isFinished ? 'border-green-500/20 bg-green-500/5' : 'border-border'
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <LazyImage
-                        src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
-                        alt="avatar"
-                        className="h-10 w-10 rounded-full border bg-background"
-                      />
-                      <div>
-                        <h4 className="font-extrabold text-sm text-foreground flex items-center gap-1.5">
-                          {p.display_name}
-                          {isFinished && (
-                            <span className="text-[10px] bg-green-500 text-white font-extrabold px-2 py-0.5 rounded-full uppercase">
-                              {p.lives === 0 && activeSession!.quiz_mode === 'santai' && activeSession!.lives_count > 0 ? '💀 GO' : '✓ Selesai'}
-                            </span>
-                          )}
-                        </h4>
-                        <span className="text-[10px] text-muted-foreground font-semibold">
-                          Peringkat #{idx + 1}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="text-right">
-                      <span className="text-[9px] font-bold text-muted-foreground uppercase block">Skor</span>
-                      <span className="font-black text-lg text-primary">{p.score}</span>
-                    </div>
-                  </div>
-
-                  {/* Mode Santai Lives indicator */}
-                  {activeSession!.quiz_mode === 'santai' && activeSession!.lives_count > 0 && (
-                    <div className="mt-3 flex items-center justify-between text-xs font-semibold">
-                      <span className="text-muted-foreground">Sisa Nyawa:</span>
-                      <span className="flex items-center gap-1">
-                        {p.lives === 0 ? (
-                          <span className="text-[10px] text-red-500 font-extrabold uppercase tracking-wide">ELIMINATED</span>
-                        ) : activeSession!.lives_count <= 5 ? (
-                          [...Array(activeSession!.lives_count)].map((_, i) => (
-                            <Heart 
-                              key={i} 
-                              className={`h-3.5 w-3.5 ${i < p.lives ? 'fill-red-500 text-red-500' : 'text-zinc-600'}`} 
-                            />
-                          ))
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <Heart className="h-3.5 w-3.5 fill-red-500 text-red-500" />
-                            <span className="text-xs font-black">{p.lives} / {activeSession!.lives_count}</span>
-                          </div>
-                        )}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Progress tracker */}
-                  <div className="mt-4">
-                    <div className="flex justify-between items-center text-[10px] font-extrabold text-muted-foreground uppercase mb-1.5">
-                      <span>Progres Soal</span>
-                      <span>{answeredCount + skippedCount} / {questions.length} Terjawab</span>
-                    </div>
-                    {/* Segmented bar */}
-                    <div className="flex gap-1">
-                      {questions.map((q, qIdx) => {
-                        const status = qStatus[q.id] || 'unanswered';
-                        let color = 'bg-zinc-800/10 dark:bg-zinc-800/30';
-                        if (status === 'answered') color = 'bg-green-500';
-                        else if (status === 'skipped') color = 'bg-yellow-500';
-                        
-                        return (
-                          <div 
-                            key={q.id} 
-                            className={`h-2 flex-1 rounded-full transition-colors ${color}`}
-                            title={`Soal ${qIdx + 1}: ${status}`}
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const isSelfPaced = activeSession?.quiz_mode === 'serius' || activeSession?.quiz_mode === 'santai';
 
   return (
     <div className="min-h-screen p-6">
@@ -1101,14 +997,14 @@ export const HostSession: React.FC = () => {
           <div className="text-center p-12 text-muted-foreground text-sm font-medium">
             Memuat sesi kuis...
           </div>
-        ) : activeSession.status === 'lobby' ? (
+        ) : activeSession.current_stage === 'waiting' ? (
           renderLobby()
-        ) : activeSession.status === 'completed' ? (
+        ) : activeSession.current_stage === 'finished' ? (
           renderPodium()
-        ) : showLeaderboardState ? (
+        ) : activeSession.current_stage === 'countdown' ? (
+          renderCountdown()
+        ) : activeSession.current_stage === 'leaderboard' ? (
           renderLeaderboard()
-        ) : isSelfPaced ? (
-          renderSelfPacedDashboard()
         ) : (
           renderActiveQuestion()
         )}

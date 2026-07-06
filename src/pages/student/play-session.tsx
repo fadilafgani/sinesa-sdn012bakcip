@@ -72,7 +72,6 @@ export const PlaySession: React.FC = () => {
 
   const selectedOptionIdsRef = useRef<string[]>([]);
   const matchingAnswersRef = useRef<Record<string, string>>({});
-  const timerIntervalRef = useRef<number | null>(null);
   const rejoinAttempted = useRef(false);
 
   // Zoom Media State
@@ -426,10 +425,10 @@ export const PlaySession: React.FC = () => {
 
   // TIMER MANAGEMENT per question
   useEffect(() => {
-    if (session?.status === 'active' && currentQuestion && !isCompleted && !showReviewScreen) {
-      const isSelfPaced = session.quiz_mode === 'serius' || session.quiz_mode === 'santai';
+    if (session?.current_stage === 'question' && currentQuestion && !isCompleted && !showReviewScreen) {
+      const isSelfPaced = false; // Always host-paced for synchronized gameplay
       
-      // If host-paced legacy mode, sync with question_expires_at
+      // If host-paced mode, sync with question_expires_at
       if (!isSelfPaced) {
         const offset = usePlayStore.getState().serverTimeOffset;
         const expiresAt = session.question_expires_at ? new Date(session.question_expires_at).getTime() : (Date.now() - offset) + 30000;
@@ -438,7 +437,7 @@ export const PlaySession: React.FC = () => {
           const diff = Math.max(0, Math.round((expiresAt - serverNow) / 1000));
           setLocalTimer(diff);
           if (diff <= 0) {
-            setShowFeedback(true);
+            // Options are naturally locked. Auto-submit if not answered.
             const state = usePlayStore.getState();
             if (!state.hasAnswered) {
               const qType = currentQuestion.question_type || 'multiple_choice';
@@ -446,71 +445,28 @@ export const PlaySession: React.FC = () => {
                 state.submitAnswer({ optionIds: selectedOptionIdsRef.current });
               } else if (qType === 'matching') {
                 state.submitAnswer({ matchingAnswers: matchingAnswersRef.current });
+              } else {
+                state.submitAnswer('');
               }
             }
-          } else {
-            setShowFeedback(false);
           }
         };
         updateLegacyTimer();
         const interval = setInterval(updateLegacyTimer, 1000);
         return () => clearInterval(interval);
       }
-
-      // Self-Paced individual timer
-      if (hasAnswered) {
-        setLocalTimer(0);
-        return;
-      }
-
-      const duration = quiz?.duration_per_question || 30;
-      setLocalTimer(duration);
-
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-
-      timerIntervalRef.current = window.setInterval(() => {
-        setLocalTimer(prev => {
-          if (prev <= 1) {
-            clearInterval(timerIntervalRef.current!);
-            handleTimeOutSelfPaced();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      return () => {
-        if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-      };
     }
-  }, [session?.status, currentQuestion?.id, hasAnswered, isCompleted, showReviewScreen]);
+  }, [session?.current_stage, currentQuestion?.id, hasAnswered, isCompleted, showReviewScreen]);
 
-  // Handle Question Timeout
-  const handleTimeOutSelfPaced = async () => {
-    if (hasAnswered || !currentQuestion || !session) return;
-    
-    // In Serious mode, auto-submit empty/current selection
-    if (session.quiz_mode === 'serius') {
-      const qType = currentQuestion.question_type || 'multiple_choice';
-      if (qType === 'multiple_answer') {
-        await submitSelfPacedAnswer({ optionIds: selectedOptionIds });
-      } else if (qType === 'matching') {
-        await submitSelfPacedAnswer({ matchingAnswers });
-      } else {
-        await submitSelfPacedAnswer({ optionId: selectedOptionIds[0] || '' });
-      }
-      
-      // Auto progress or review screen
-      if (currentQuestionIndex + 1 < questions.length) {
-        await setQuestionProgress(currentQuestionIndex + 1);
-      } else {
-        setShowReviewScreen(true);
-      }
+  // Synchronize showFeedback state with current_stage
+  useEffect(() => {
+    if (session?.current_stage === 'question_result') {
+      setShowFeedback(true);
     } else {
-      // In Casual/Adventure mode, auto-skip the question
-      await skipQuestion(currentQuestion.id);
+      setShowFeedback(false);
     }
-  };
+  }, [session?.current_stage]);
+
 
   // Play audio tones when answer feedback is rendered
   useEffect(() => {
@@ -624,7 +580,8 @@ export const PlaySession: React.FC = () => {
   }
 
   // 1. Lobby Waiting Screen
-  if (session?.status === 'lobby') {
+  // 1. Lobby Waiting Screen
+  if (session?.current_stage === 'waiting') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[90vh] text-center p-4">
         <motion.div
@@ -668,6 +625,54 @@ export const PlaySession: React.FC = () => {
           >
             Batal & Keluar Lobby
           </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // 1.5. Countdown Screen
+  if (session?.current_stage === 'countdown' && participant) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-mesh p-4">
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="glass-panel p-12 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-primary/20 flex flex-col items-center justify-center text-center animate-pulse"
+        >
+          <span className="text-xs uppercase font-bold text-muted-foreground tracking-widest block mb-2">
+            Bersiaplah!
+          </span>
+          <span className="text-6xl font-black text-primary block animate-bounce">
+            🏁
+          </span>
+          <p className="text-sm text-foreground font-semibold">Soal {session.current_question_index + 1} segera dimulai...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // 1.6. Leaderboard Wait Screen
+  if (session?.current_stage === 'leaderboard' && participant) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-mesh p-4">
+        <motion.div
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          className="glass-panel p-8 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-primary/20 text-center flex flex-col items-center justify-center"
+        >
+          <div className="h-16 w-16 bg-primary/10 border border-primary/30 rounded-full flex items-center justify-center text-3xl animate-bounce">
+            📊
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-black text-foreground">Papan Skor Sedang Ditampilkan</h2>
+            <p className="text-xs text-muted-foreground font-semibold">
+              Perhatikan layar Guru untuk melihat posisi peringkat kelas!
+            </p>
+          </div>
+          <div className="bg-primary/5 border border-primary/20 p-4 rounded-2xl w-full flex justify-between items-center">
+            <span className="text-xs font-bold text-muted-foreground">Skor Anda saat ini:</span>
+            <span className="text-sm font-black text-primary">{participant.score} Pts</span>
+          </div>
         </motion.div>
       </div>
     );
@@ -850,7 +855,7 @@ export const PlaySession: React.FC = () => {
   }
 
   // 2. Play session ended (Results/Podium screen)
-  if (isCompleted || session?.status === 'completed' || !session) {
+  if (isCompleted || session?.current_stage === 'finished' || session?.status === 'completed' || !session) {
     const isGameOver = lives === 0 && session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0;
     const showFinalResultSetting = quiz?.show_final_result !== false;
     const showLeaderboardSetting = quiz?.show_leaderboard !== false;
@@ -1026,7 +1031,7 @@ export const PlaySession: React.FC = () => {
     );
   }
 
-  const isSelfPaced = session.quiz_mode === 'serius' || session.quiz_mode === 'santai';
+  const isSelfPaced = false; // Always host-paced for synchronized gameplay
   const colors = [
     'option-button-red',
     'option-button-blue',

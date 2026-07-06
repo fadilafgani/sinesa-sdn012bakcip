@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS public.quiz_sessions (
     quiz_id UUID REFERENCES public.quizzes(id) ON DELETE CASCADE NOT NULL,
     host_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
     status VARCHAR(20) CHECK (status IN ('lobby', 'active', 'completed')) DEFAULT 'lobby' NOT NULL,
+    current_stage VARCHAR(30) DEFAULT 'waiting' NOT NULL,
     current_question_index INTEGER DEFAULT -1 NOT NULL,
     question_started_at TIMESTAMP WITH TIME ZONE,
     question_expires_at TIMESTAMP WITH TIME ZONE,

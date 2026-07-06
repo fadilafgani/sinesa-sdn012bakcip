@@ -17,7 +17,8 @@ interface HostState {
   createSession: (quizId: string) => Promise<string | null>; // Returns PIN
   startQuiz: () => Promise<void>;
   nextQuestion: () => Promise<void>;
-  showLeaderboard: () => void;
+  showLeaderboard: () => Promise<void>;
+  publishQuestionStage: () => Promise<void>;
   endQuiz: () => Promise<void>;
   revealAnswer: () => Promise<void>;
   clearSession: () => void;
@@ -71,6 +72,7 @@ export const useHostStore = create<HostState>((set, get) => {
             quiz_id: quizId,
             host_id: 'mock-uuid-teacher',
             status: 'lobby',
+            current_stage: 'waiting',
             current_question_index: -1,
             question_started_at: null,
             question_expires_at: null,
@@ -195,6 +197,7 @@ export const useHostStore = create<HostState>((set, get) => {
                 quiz_id: quizId,
                 host_id: user.id,
                 status: 'lobby',
+                current_stage: 'waiting',
                 current_question_index: -1,
                 quiz_mode: quizData.quiz_mode || 'serius',
                 lives_count: quizData.lives_count !== undefined ? quizData.lives_count : 3,
@@ -293,7 +296,7 @@ export const useHostStore = create<HostState>((set, get) => {
       const isMock = checkIsMock();
 
       if (isMock) {
-        const updatedSession = { ...session, status: 'active' as const, current_question_index: -1 };
+        const updatedSession = { ...session, status: 'active' as const, current_stage: 'countdown' as const, current_question_index: 0 };
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
         set({ activeSession: updatedSession });
         return;
@@ -304,7 +307,7 @@ export const useHostStore = create<HostState>((set, get) => {
 
       const { error } = await supabase
         .from('quiz_sessions')
-        .update({ status: 'active', current_question_index: -1 })
+        .update({ status: 'active', current_stage: 'countdown', current_question_index: 0 })
         .eq('id', session.id);
 
       if (error) throw error;
@@ -313,7 +316,8 @@ export const useHostStore = create<HostState>((set, get) => {
         activeSession: {
           ...session,
           status: 'active',
-          current_question_index: -1,
+          current_stage: 'countdown',
+          current_question_index: 0,
         }
       });
     },
@@ -378,16 +382,10 @@ export const useHostStore = create<HostState>((set, get) => {
         options = (data as Option[]) || [];
       }
 
-      const now = new Date();
-      const quiz = get().quiz;
-      const durationSeconds = quiz?.duration_per_question || 30;
-      const expiresAt = new Date(now.getTime() + durationSeconds * 1000);
-
       const updatedSession: QuizSession = {
         ...session,
         current_question_index: nextIndex,
-        question_started_at: now.toISOString(),
-        question_expires_at: expiresAt.toISOString(),
+        current_stage: 'countdown',
       };
 
       set({
@@ -399,6 +397,46 @@ export const useHostStore = create<HostState>((set, get) => {
 
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+      } else {
+        // Update database for supabase realtime
+        const { error } = await supabase
+          .from('quiz_sessions')
+          .update({
+            current_question_index: nextIndex,
+            current_stage: 'countdown',
+          })
+          .eq('id', session.id);
+
+        if (error) throw error;
+      }
+    },
+
+    publishQuestionStage: async () => {
+      const session = get().activeSession;
+      const currentQuestion = get().currentQuestion;
+      const options = get().currentOptions;
+      if (!session || !currentQuestion) return;
+
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
+      const isMock = checkIsMock();
+      const now = new Date();
+      const quiz = get().quiz;
+      const durationSeconds = quiz?.duration_per_question || 30;
+      const expiresAt = new Date(now.getTime() + durationSeconds * 1000);
+
+      const updatedSession: QuizSession = {
+        ...session,
+        current_stage: 'question',
+        question_started_at: now.toISOString(),
+        question_expires_at: expiresAt.toISOString(),
+      };
+
+      set({ activeSession: updatedSession });
+
+      if (isMock) {
+        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
 
         // Simulate virtual students submitting answers
         const intervals: number[] = [];
@@ -406,7 +444,8 @@ export const useHostStore = create<HostState>((set, get) => {
           const delay = 2000 + Math.random() * 8000; // random delay to answer
           const timeoutId = window.setTimeout(() => {
             // Prevent submitting if question changed or timer expired
-            if (get().activeSession?.current_question_index !== nextIndex) return;
+            if (get().activeSession?.current_question_index !== session.current_question_index) return;
+            if (get().activeSession?.current_stage !== 'question') return;
 
             // Pick an option (mostly correct, some incorrect to make leaderboard fun)
             const correctOpt = options.find(o => o.is_correct) || options[0];
@@ -423,13 +462,13 @@ export const useHostStore = create<HostState>((set, get) => {
             const maxSeconds = get().quiz?.duration_per_question || 30;
             const timeRatio = Math.min(timeTaken / (maxSeconds * 1000), 1);
             const scoreAwarded = isCorrect 
-              ? Math.round(nextQuestion.points * (1 - timeRatio * 0.5)) 
+              ? Math.round(currentQuestion.points * (1 - timeRatio * 0.5)) 
               : 0;
 
             const mockAnswer: Answer = {
-              id: `ans-mock-${pIdx}-${nextIndex}`,
+              id: `ans-mock-${pIdx}-${session.current_question_index}`,
               participant_id: part.id,
-              question_id: nextQuestion.id,
+              question_id: currentQuestion.id,
               selected_option_id: pickedOption.id,
               is_correct: isCorrect,
               response_time_ms: timeTaken,
@@ -461,12 +500,10 @@ export const useHostStore = create<HostState>((set, get) => {
 
         set({ virtualStudentIntervals: intervals });
       } else {
-        // Update database for supabase realtime
         const { error } = await supabase
           .from('quiz_sessions')
           .update({
-            status: 'active',
-            current_question_index: nextIndex,
+            current_stage: 'question',
             question_started_at: now.toISOString(),
             question_expires_at: expiresAt.toISOString(),
           })
@@ -476,8 +513,31 @@ export const useHostStore = create<HostState>((set, get) => {
       }
     },
 
-    showLeaderboard: () => {
-      // Leaderboard updates automatically through participants scores
+    showLeaderboard: async () => {
+      // Auto-refresh token if expired
+      try { await supabase.auth.getSession(); } catch (e) {}
+
+      const session = get().activeSession;
+      if (!session) return;
+
+      const isMock = checkIsMock();
+      const updatedSession: QuizSession = {
+        ...session,
+        current_stage: 'leaderboard',
+      };
+
+      set({ activeSession: updatedSession });
+
+      if (isMock) {
+        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+      } else {
+        const { error } = await supabase
+          .from('quiz_sessions')
+          .update({ current_stage: 'leaderboard' })
+          .eq('id', session.id);
+
+        if (error) throw error;
+      }
     },
 
     endQuiz: async () => {
@@ -491,6 +551,7 @@ export const useHostStore = create<HostState>((set, get) => {
       const updatedSession: QuizSession = {
         ...session,
         status: 'completed',
+        current_stage: 'finished',
         completed_at: new Date().toISOString(),
       };
 
@@ -503,6 +564,7 @@ export const useHostStore = create<HostState>((set, get) => {
           .from('quiz_sessions')
           .update({
             status: 'completed',
+            current_stage: 'finished',
             completed_at: new Date().toISOString(),
           })
           .eq('id', session.id);
@@ -523,6 +585,7 @@ export const useHostStore = create<HostState>((set, get) => {
 
       const updatedSession: QuizSession = {
         ...session,
+        current_stage: 'question_result',
         question_expires_at: now.toISOString(),
       };
 
@@ -534,6 +597,7 @@ export const useHostStore = create<HostState>((set, get) => {
         const { error } = await supabase
           .from('quiz_sessions')
           .update({
+            current_stage: 'question_result',
             question_expires_at: now.toISOString(),
           })
           .eq('id', session.id);

@@ -73,6 +73,7 @@ export interface QuizSession {
   quiz_id: string;
   host_id: string;
   status: 'lobby' | 'active' | 'completed';
+  current_stage: 'waiting' | 'countdown' | 'question' | 'question_result' | 'leaderboard' | 'finished';
   current_question_index: number;
   question_started_at: string | null;
   question_expires_at: string | null;
