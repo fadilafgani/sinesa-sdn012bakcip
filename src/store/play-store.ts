@@ -635,6 +635,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
           event: 'UPDATE',
           schema: 'public',
           table: 'quiz_sessions',
+          filter: `id=eq.${sessionId}`,
         }, async (payload) => {
           console.log('PlayStore: Received postgres_changes UPDATE payload:', payload);
           const updatedSess = payload.new as QuizSession;

@@ -803,6 +803,7 @@ export const useHostStore = create<HostState>((set, get) => {
           event: 'UPDATE',
           schema: 'public',
           table: 'quiz_sessions',
+          filter: `id=eq.${sessionId}`,
         }, async (payload) => {
           console.log('HostStore: Realtime session update payload:', payload);
           const updatedSess = payload.new as QuizSession;
