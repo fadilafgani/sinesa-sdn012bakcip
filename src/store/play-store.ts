@@ -378,7 +378,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
             quiz: quizData as Quiz,
             participant: partData as Participant,
             questions: loadedQs,
-            currentQuestionIndex: partData.current_progress || 0,
+            currentQuestionIndex: sessionData.current_question_index >= 0 ? sessionData.current_question_index : 0,
             lives: partData.lives !== undefined && partData.lives !== null ? partData.lives : (quizData?.lives_count !== undefined ? quizData.lives_count : 3),
             skippedQuestions: partData.skipped_questions || [],
             questionStatus: partData.question_status || {},
@@ -390,7 +390,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
           // Fetch current question options
           if (loadedQs.length > 0) {
-            const activeIdx = partData.current_progress || 0;
+            const activeIdx = sessionData.current_question_index >= 0 ? sessionData.current_question_index : 0;
             const activeQ = loadedQs[activeIdx];
             if (activeQ) {
               const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
@@ -636,90 +636,22 @@ export const usePlayStore = create<PlayState>((set, get) => {
           schema: 'public',
           table: 'quiz_sessions',
         }, async (payload) => {
+          console.log('PlayStore: Received postgres_changes UPDATE payload:', payload);
           const updatedSess = payload.new as QuizSession;
           if (updatedSess.id !== sessionId) return;
           get().handleSessionUpdate(updatedSess);
         })
-        .subscribe();
-
-      // Start a fallback polling interval (every 2 seconds) in case Supabase Realtime fails in production
-      const intervalId = window.setInterval(async () => {
-        try {
-          // Auto-refresh token if expired
-          try {
-            await supabase.auth.getSession();
-          } catch (e) {}
-
-          const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-          const { data: latestSess, error } = await supabase
-            .from('quiz_sessions')
-            .select('*')
-            .eq('id', sessionId)
-            .neq('id', cacheBuster)
-            .single();
-
-          if (error) {
-            console.error('play-store polling fallback query error:', error);
-          }
-          if (!error && latestSess) {
-            const previousSess = get().session;
-            const indexChanged = previousSess?.current_question_index !== latestSess.current_question_index;
-            const statusChanged = previousSess?.status !== latestSess.status;
-            const stageChanged = previousSess?.current_stage !== latestSess.current_stage;
-            const activeButNoQuestion = latestSess.status === 'active' && get().currentQuestion === null;
-            
-            if (statusChanged || indexChanged || stageChanged || activeButNoQuestion) {
-              console.log('play-store polling fallback: session updated/healed', latestSess);
-              await get().handleSessionUpdate(latestSess as QuizSession);
-            }
-
-            // Self-paced participant state healing
-            if (latestSess.status === 'active') {
-              const part = get().participant;
-              if (part) {
-                const { data: latestPart } = await supabase
-                  .from('participants')
-                  .select('*')
-                  .eq('id', part.id)
-                  .single();
-                  
-                if (latestPart) {
-                  const livesDiff = latestPart.lives !== get().lives;
-                  const completionDiff = latestPart.is_completed !== get().isCompleted;
-
-                  if (livesDiff || completionDiff) {
-                    console.log('play-store polling fallback: healing participant state', latestPart);
-                    
-                    // Re-sync answers map to get latest correct answers
-                    const { data: answersData } = await supabase
-                      .from('answers')
-                      .select('*')
-                      .eq('participant_id', part.id);
-                    
-                    const map: Record<string, Answer> = {};
-                    if (answersData) {
-                      answersData.forEach((a: any) => {
-                        map[a.question_id] = a as Answer;
-                      });
-                    }
-
-                    set({
-                      participant: latestPart as Participant,
-                      lives: latestPart.lives !== undefined && latestPart.lives !== null ? latestPart.lives : get().lives,
-                      isCompleted: latestPart.is_completed || false,
-                      answersMap: map
-                    });
-                  }
-                }
+        .subscribe((status, err) => {
+          console.log(`PlayStore: Realtime channel status for session ${sessionId}:`, status, err);
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            console.warn(`PlayStore: Connection issue detected (${status}). Attempting to reconnect channel...`);
+            setTimeout(() => {
+              if (get().session?.id === sessionId) {
+                get().listenToSession(sessionId);
               }
-            }
+            }, 3000);
           }
-        } catch (err) {
-          console.error('play-store polling fallback error:', err);
-        }
-      }, 2000);
-
-      set({ pollingInterval: intervalId });
+        });
     },
 
     stopListening: () => {

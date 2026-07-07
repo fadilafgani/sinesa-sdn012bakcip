@@ -50,7 +50,8 @@ export const PlaySession: React.FC = () => {
   } = usePlayStore();
 
   const [localTimer, setLocalTimer] = useState(0);
-  const [showFeedback, setShowFeedback] = useState(false);
+  const showFeedback = session?.current_stage === 'question_result';
+  const setShowFeedback = (_val: boolean) => {}; // Dummy to support legacy/unreachable self-paced code compilation
   const [showReviewScreen, setShowReviewScreen] = useState(false);
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
   const [matchingAnswers, setMatchingAnswers] = useState<Record<string, string>>({});
@@ -197,7 +198,7 @@ export const PlaySession: React.FC = () => {
 
   // Fetch leaderboard when kuis is completed
   useEffect(() => {
-    if ((isCompleted || session?.status === 'completed') && quiz?.show_leaderboard && quiz?.show_final_result) {
+    if ((isCompleted || session?.status === 'completed' || session?.current_stage === 'finished') && quiz?.show_leaderboard && quiz?.show_final_result) {
       setLoadingLeaderboard(true);
       usePlayStore.getState().fetchLeaderboard()
         .then(res => {
@@ -210,7 +211,7 @@ export const PlaySession: React.FC = () => {
           setLoadingLeaderboard(false);
         });
     }
-  }, [isCompleted, session?.status, quiz?.show_leaderboard, quiz?.show_final_result]);
+  }, [isCompleted, session?.status, session?.current_stage, quiz?.show_leaderboard, quiz?.show_final_result]);
 
   // Fetch all options for post-submission review
   const fetchAllOptions = async () => {
@@ -456,16 +457,9 @@ export const PlaySession: React.FC = () => {
         return () => clearInterval(interval);
       }
     }
-  }, [session?.current_stage, currentQuestion?.id, hasAnswered, isCompleted, showReviewScreen]);
+  }, [session?.current_stage, session?.question_expires_at, currentQuestion?.id, hasAnswered, isCompleted, showReviewScreen]);
 
-  // Synchronize showFeedback state with current_stage
-  useEffect(() => {
-    if (session?.current_stage === 'question_result') {
-      setShowFeedback(true);
-    } else {
-      setShowFeedback(false);
-    }
-  }, [session?.current_stage]);
+
 
 
   // Play audio tones when answer feedback is rendered

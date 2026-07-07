@@ -12,7 +12,6 @@ import { showConfirm, showError } from '../../lib/swal';
 import { supabase } from '../../lib/supabase';
 import { LazyImage } from '../../components/lazy-image';
 import { getSafeMediaUrl } from '../../lib/media';
-import type { QuizSession, Option } from '../../types';
 
 export const HostSession: React.FC = () => {
   const navigate = useNavigate();
@@ -35,6 +34,7 @@ export const HostSession: React.FC = () => {
     clearSession,
     subscribeToLobby,
     subscribeToAnswers,
+    subscribeToSession,
     unsubscribeAll
   } = useHostStore();
 
@@ -172,93 +172,38 @@ export const HostSession: React.FC = () => {
     }
   }, [activeSession?.id, questions.length, quizId]);
 
-  // Polling Fallback (highly resilient to Supabase Realtime/replication delays)
+  // Load initial data once and subscribe to Supabase Realtime updates
   useEffect(() => {
     if (!activeSession?.id || isMock) return;
 
     const sessionId = activeSession.id;
-    console.log('HostSession: Polling started for session ID:', sessionId);
-    
-    const fetchLatest = async () => {
+    console.log('HostSession: Initializing session subscriptions for ID:', sessionId);
+
+    const loadInitialData = async () => {
       try {
-        // Auto-refresh token if expired
-        try {
-          await supabase.auth.getSession();
-        } catch (e) {}
-
-        // Fetch latest session row to sync state drifts
-        const cacheBusterSess = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-        const { data: latestSess } = await supabase
-          .from('quiz_sessions')
-          .select('*')
-          .eq('id', sessionId)
-          .neq('id', cacheBusterSess)
-          .single();
-
-        if (latestSess) {
-          const localSess = useHostStore.getState().activeSession;
-          if (localSess && (localSess.status !== latestSess.status || localSess.current_question_index !== latestSess.current_question_index)) {
-            console.log('HostSession polling: syncing session state with database', latestSess);
-            
-            let activeQuestion = null;
-            let activeOptions: Option[] = [];
-            const questions = useHostStore.getState().questions;
-            
-            if (latestSess.status === 'active' && latestSess.current_question_index >= 0) {
-              if (questions[latestSess.current_question_index]) {
-                activeQuestion = questions[latestSess.current_question_index];
-                const { data: optionsData } = await supabase
-                  .from('options')
-                  .select('*')
-                  .eq('question_id', activeQuestion.id);
-                activeOptions = (optionsData as Option[]) || [];
-              }
-            }
-
-            useHostStore.setState({ 
-              activeSession: latestSess as QuizSession,
-              currentQuestion: activeQuestion,
-              currentOptions: activeOptions
-            });
-          }
-        }
-
         const currentStatus = useHostStore.getState().activeSession?.status;
-        console.log('HostSession polling: fetching data. Status =', currentStatus);
-        
         if (currentStatus === 'lobby' || currentStatus === 'active') {
           await useHostStore.getState().fetchParticipants(sessionId);
-          console.log('HostSession polling: fetched participants. Count =', useHostStore.getState().participants.length);
         }
         if (currentStatus === 'active') {
           await useHostStore.getState().fetchAnswers(sessionId);
-          console.log('HostSession polling: fetched answers. Count =', useHostStore.getState().submissions.length);
         }
       } catch (err) {
-        console.error('HostSession polling error:', err);
+        console.error('HostSession: Error loading initial data:', err);
       }
     };
 
-    fetchLatest();
-    const interval = setInterval(fetchLatest, 2000);
+    loadInitialData();
+
+    subscribeToSession(sessionId);
+    subscribeToLobby(sessionId);
+    subscribeToAnswers(sessionId);
 
     return () => {
-      console.log('HostSession: Polling stopped for session ID:', sessionId);
-      clearInterval(interval);
-    };
-  }, [activeSession?.id, isMock]);
-
-  // Realtime Subscription Management
-  useEffect(() => {
-    if (!activeSession || isMock) return;
-
-    subscribeToLobby(activeSession.id);
-    subscribeToAnswers(activeSession.id);
-
-    return () => {
+      console.log('HostSession: Cleaning up subscriptions for ID:', sessionId);
       unsubscribeAll();
     };
-  }, [activeSession?.id, isMock, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
+  }, [activeSession?.id, isMock, subscribeToSession, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
 
   // Manage countdown automatically
   useEffect(() => {

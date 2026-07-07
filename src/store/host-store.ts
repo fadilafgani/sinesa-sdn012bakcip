@@ -26,6 +26,7 @@ interface HostState {
 
   subscribeToLobby: (sessionId: string) => void;
   subscribeToAnswers: (sessionId: string) => void;
+  subscribeToSession: (sessionId: string) => void;
   unsubscribeAll: () => void;
   fetchParticipants: (sessionId: string) => Promise<void>;
   fetchAnswers: (sessionId: string) => Promise<void>;
@@ -34,6 +35,7 @@ interface HostState {
 export const useHostStore = create<HostState>((set, get) => {
   let lobbySubscription: any = null;
   let answerSubscription: any = null;
+  let sessionSubscription: any = null;
   let creationPromise: Promise<string | null> | null = null;
 
   // Mock list of students to simulate real-time joining in offline demo
@@ -786,6 +788,56 @@ export const useHostStore = create<HostState>((set, get) => {
         .subscribe();
     },
 
+    subscribeToSession: (sessionId: string) => {
+      const isMock = checkIsMock();
+      if (isMock) return;
+
+      if (sessionSubscription) {
+        supabase.removeChannel(sessionSubscription);
+        sessionSubscription = null;
+      }
+
+      sessionSubscription = supabase
+        .channel(`host_session_updates:${sessionId}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'quiz_sessions',
+        }, async (payload) => {
+          console.log('HostStore: Realtime session update payload:', payload);
+          const updatedSess = payload.new as QuizSession;
+          if (updatedSess.id !== sessionId) return;
+
+          const currentQuestion = get().currentQuestion;
+          const questions = get().questions;
+          let activeQuestion = currentQuestion;
+          let activeOptions = get().currentOptions;
+
+          if (updatedSess.current_question_index >= 0) {
+            const indexChanged = !currentQuestion || get().activeSession?.current_question_index !== updatedSess.current_question_index;
+            if (indexChanged && questions[updatedSess.current_question_index]) {
+              activeQuestion = questions[updatedSess.current_question_index];
+              const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+              const { data } = await supabase
+                .from('options')
+                .select('*')
+                .eq('question_id', activeQuestion.id)
+                .neq('id', cacheBusterOpts);
+              activeOptions = (data as Option[]) || [];
+            }
+          }
+
+          set({
+            activeSession: updatedSess,
+            currentQuestion: activeQuestion,
+            currentOptions: activeOptions,
+          });
+        })
+        .subscribe((status, err) => {
+          console.log(`HostStore: Realtime channel status for session ${sessionId}:`, status, err);
+        });
+    },
+
     unsubscribeAll: () => {
       if (lobbySubscription) {
         supabase.removeChannel(lobbySubscription);
@@ -794,6 +846,10 @@ export const useHostStore = create<HostState>((set, get) => {
       if (answerSubscription) {
         supabase.removeChannel(answerSubscription);
         answerSubscription = null;
+      }
+      if (sessionSubscription) {
+        supabase.removeChannel(sessionSubscription);
+        sessionSubscription = null;
       }
     }
   };
