@@ -938,6 +938,7 @@ export const HostSession: React.FC = () => {
           </div>
         </div>
 
+        {(() => { console.log('[SYNC] HostSession: Render with stage =', activeSession?.current_stage, 'questionIdx =', activeSession?.current_question_index); return null; })()}
         {activeSession === null || questions.length === 0 ? (
           <div className="text-center p-12 text-muted-foreground text-sm font-medium">
             Memuat sesi kuis...

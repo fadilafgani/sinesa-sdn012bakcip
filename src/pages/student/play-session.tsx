@@ -168,14 +168,13 @@ export const PlaySession: React.FC = () => {
     }
   }, [session, loading, pin, name, profile?.id]);
 
-  // Listen to Session
+  // ponytail: listenToSession is now called directly inside joinSession() in the store,
+  // so we only need cleanup on unmount here.
   useEffect(() => {
-    if (!session?.id || isMock) return;
-    usePlayStore.getState().listenToSession(session.id);
     return () => {
       usePlayStore.getState().stopListening();
     };
-  }, [session?.id, isMock]);
+  }, []);
 
   // Fetch realtime question stats when student answers
   useEffect(() => {
@@ -547,6 +546,18 @@ export const PlaySession: React.FC = () => {
     );
   }
 
+  // Not yet joined — show loading instead of completed screen (Bug 5 fix)
+  if (!session && !playError) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-mesh">
+        <div className="text-center space-y-4">
+          <div className="h-10 w-10 animate-spin border-4 border-primary border-t-transparent rounded-full mx-auto" />
+          <p className="text-sm text-muted-foreground font-semibold">Memuat sesi kuis...</p>
+        </div>
+      </div>
+    );
+  }
+
   // Error Screen
   if (playError) {
     return (
@@ -574,7 +585,7 @@ export const PlaySession: React.FC = () => {
   }
 
   // 1. Lobby Waiting Screen
-  // 1. Lobby Waiting Screen
+  console.log('[SYNC] PlaySession: Render with stage =', session?.current_stage, 'questionIdx =', session?.current_question_index);
   if (session?.current_stage === 'waiting') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[90vh] text-center p-4">
@@ -849,7 +860,8 @@ export const PlaySession: React.FC = () => {
   }
 
   // 2. Play session ended (Results/Podium screen)
-  if (isCompleted || session?.current_stage === 'finished' || session?.status === 'completed' || !session) {
+  if (isCompleted || session?.current_stage === 'finished' || session?.status === 'completed') {
+    console.log('[SYNC] PlaySession: Rendering completed/finished screen');
     const isGameOver = lives === 0 && session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0;
     const showFinalResultSetting = quiz?.show_final_result !== false;
     const showLeaderboardSetting = quiz?.show_leaderboard !== false;
@@ -1169,9 +1181,9 @@ export const PlaySession: React.FC = () => {
           </button>
           {isSelfPaced && (
             <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
-              session.quiz_mode === 'santai' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
+              session?.quiz_mode === 'santai' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
             }`}>
-              {session.quiz_mode === 'santai' ? '🕹️ Casual' : '🎓 Serius'}
+              {session?.quiz_mode === 'santai' ? '🕹️ Casual' : '🎓 Serius'}
             </span>
           )}
           {quiz?.anti_cheat_enabled && (
@@ -1182,7 +1194,7 @@ export const PlaySession: React.FC = () => {
         </div>
 
         <div className="text-center flex items-center gap-2">
-          {isSelfPaced && session.quiz_mode === 'santai' && quiz && quiz.lives_count > 0 && (
+          {isSelfPaced && session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0 && (
             <div className="flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-3 py-1 rounded-full mr-2">
               <span className="text-xs font-black tracking-wider uppercase mr-1">Nyawa:</span>
               {quiz.lives_count <= 5 ? (

@@ -307,12 +307,14 @@ export const useHostStore = create<HostState>((set, get) => {
       // Auto-refresh token if expired
       try { await supabase.auth.getSession(); } catch (e) {}
 
+      console.log('[SYNC] HostStore.startQuiz: Updating DB...');
       const { error } = await supabase
         .from('quiz_sessions')
         .update({ status: 'active', current_stage: 'countdown', current_question_index: 0 })
         .eq('id', session.id);
 
       if (error) throw error;
+      console.log('[SYNC] HostStore.startQuiz: DB updated. Setting local state...');
       
       set({
         activeSession: {
@@ -322,6 +324,7 @@ export const useHostStore = create<HostState>((set, get) => {
           current_question_index: 0,
         }
       });
+      console.log('[SYNC] HostStore.startQuiz: Local state set to countdown');
     },
 
     nextQuestion: async () => {
@@ -391,7 +394,6 @@ export const useHostStore = create<HostState>((set, get) => {
       };
 
       set({
-        activeSession: updatedSession,
         currentQuestion: nextQuestion,
         currentOptions: options,
         submissions: [],
@@ -399,8 +401,10 @@ export const useHostStore = create<HostState>((set, get) => {
 
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+        set({ activeSession: updatedSession });
       } else {
-        // Update database for supabase realtime
+        // Update database first, then set local state
+        console.log('[SYNC] HostStore.nextQuestion: Updating DB to index', nextIndex);
         const { error } = await supabase
           .from('quiz_sessions')
           .update({
@@ -410,6 +414,8 @@ export const useHostStore = create<HostState>((set, get) => {
           .eq('id', session.id);
 
         if (error) throw error;
+        console.log('[SYNC] HostStore.nextQuestion: DB updated. Setting local state...');
+        set({ activeSession: updatedSession });
       }
     },
 
@@ -435,10 +441,9 @@ export const useHostStore = create<HostState>((set, get) => {
         question_expires_at: expiresAt.toISOString(),
       };
 
-      set({ activeSession: updatedSession });
-
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+        set({ activeSession: updatedSession });
 
         // Simulate virtual students submitting answers
         const intervals: number[] = [];
@@ -502,6 +507,7 @@ export const useHostStore = create<HostState>((set, get) => {
 
         set({ virtualStudentIntervals: intervals });
       } else {
+        console.log('[SYNC] HostStore.publishQuestionStage: Updating DB...');
         const { error } = await supabase
           .from('quiz_sessions')
           .update({
@@ -512,6 +518,8 @@ export const useHostStore = create<HostState>((set, get) => {
           .eq('id', session.id);
 
         if (error) throw error;
+        console.log('[SYNC] HostStore.publishQuestionStage: DB updated. Setting local state...');
+        set({ activeSession: updatedSession });
       }
     },
 
@@ -528,17 +536,19 @@ export const useHostStore = create<HostState>((set, get) => {
         current_stage: 'leaderboard',
       };
 
-      set({ activeSession: updatedSession });
-
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+        set({ activeSession: updatedSession });
       } else {
+        console.log('[SYNC] HostStore.showLeaderboard: Updating DB...');
         const { error } = await supabase
           .from('quiz_sessions')
           .update({ current_stage: 'leaderboard' })
           .eq('id', session.id);
 
         if (error) throw error;
+        console.log('[SYNC] HostStore.showLeaderboard: DB updated. Setting local state...');
+        set({ activeSession: updatedSession });
       }
     },
 
@@ -557,11 +567,11 @@ export const useHostStore = create<HostState>((set, get) => {
         completed_at: new Date().toISOString(),
       };
 
-      set({ activeSession: updatedSession, currentQuestion: null });
-
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+        set({ activeSession: updatedSession, currentQuestion: null });
       } else {
+        console.log('[SYNC] HostStore.endQuiz: Updating DB...');
         await supabase
           .from('quiz_sessions')
           .update({
@@ -571,6 +581,8 @@ export const useHostStore = create<HostState>((set, get) => {
           })
           .eq('id', session.id);
         
+        console.log('[SYNC] HostStore.endQuiz: DB updated. Setting local state...');
+        set({ activeSession: updatedSession, currentQuestion: null });
         get().unsubscribeAll();
       }
     },
@@ -591,11 +603,11 @@ export const useHostStore = create<HostState>((set, get) => {
         question_expires_at: now.toISOString(),
       };
 
-      set({ activeSession: updatedSession });
-
       if (isMock) {
         localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
+        set({ activeSession: updatedSession });
       } else {
+        console.log('[SYNC] HostStore.revealAnswer: Updating DB...');
         const { error } = await supabase
           .from('quiz_sessions')
           .update({
@@ -605,6 +617,8 @@ export const useHostStore = create<HostState>((set, get) => {
           .eq('id', session.id);
 
         if (error) throw error;
+        console.log('[SYNC] HostStore.revealAnswer: DB updated. Setting local state...');
+        set({ activeSession: updatedSession });
       }
     },
 
@@ -805,7 +819,10 @@ export const useHostStore = create<HostState>((set, get) => {
           table: 'quiz_sessions',
           filter: `id=eq.${sessionId}`,
         }, async (payload) => {
-          console.log('HostStore: Realtime session update payload:', payload);
+          console.log('[SYNC] HostStore: Realtime session update', {
+            stage: (payload.new as any)?.current_stage,
+            questionIndex: (payload.new as any)?.current_question_index,
+          });
           const updatedSess = payload.new as QuizSession;
           if (updatedSess.id !== sessionId) return;
 

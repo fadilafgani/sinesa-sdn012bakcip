@@ -411,6 +411,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
             }
           }
 
+          // ponytail: start listening immediately inside joinSession to eliminate gap
+          // where Realtime events could be missed between join and useEffect firing
+          console.log('[SYNC] PlayStore.joinSession: Starting realtime listener for session', sessionData.id);
+          get().listenToSession(sessionData.id);
+
           return true;
         } catch (err) {
           console.error('Error joining session:', err);
@@ -637,15 +642,45 @@ export const usePlayStore = create<PlayState>((set, get) => {
           table: 'quiz_sessions',
           filter: `id=eq.${sessionId}`,
         }, async (payload) => {
-          console.log('PlayStore: Received postgres_changes UPDATE payload:', payload);
+          console.log('[SYNC] PlayStore: Realtime event received', {
+            stage: (payload.new as any)?.current_stage,
+            questionIndex: (payload.new as any)?.current_question_index,
+            status: (payload.new as any)?.status,
+          });
           const updatedSess = payload.new as QuizSession;
           if (updatedSess.id !== sessionId) return;
           get().handleSessionUpdate(updatedSess);
         })
-        .subscribe((status, err) => {
-          console.log(`PlayStore: Realtime channel status for session ${sessionId}:`, status, err);
+        .subscribe(async (status, err) => {
+          console.log(`[SYNC] PlayStore: Channel status = ${status}`, err || '');
+          if (status === 'SUBSCRIBED') {
+            // Fresh fetch to catch any events missed during the subscribe handshake
+            try {
+              const { data: freshSession } = await supabase
+                .from('quiz_sessions')
+                .select('*')
+                .eq('id', sessionId)
+                .single();
+              if (freshSession) {
+                const currentSess = get().session;
+                if (currentSess && (
+                  currentSess.current_stage !== freshSession.current_stage ||
+                  currentSess.current_question_index !== freshSession.current_question_index ||
+                  currentSess.status !== freshSession.status
+                )) {
+                  console.log('[SYNC] PlayStore: Caught missed update via fresh fetch', {
+                    oldStage: currentSess.current_stage,
+                    newStage: freshSession.current_stage,
+                  });
+                  get().handleSessionUpdate(freshSession as QuizSession);
+                }
+              }
+            } catch (e) {
+              console.warn('[SYNC] PlayStore: Fresh fetch after subscribe failed:', e);
+            }
+          }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.warn(`PlayStore: Connection issue detected (${status}). Attempting to reconnect channel...`);
+            console.warn(`[SYNC] PlayStore: Connection issue (${status}). Reconnecting in 3s...`);
             setTimeout(() => {
               if (get().session?.id === sessionId) {
                 get().listenToSession(sessionId);
@@ -691,11 +726,20 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     handleSessionUpdate: async (updatedSess: QuizSession) => {
       const previousSess = get().session;
+      console.log('[SYNC] PlayStore.handleSessionUpdate:', {
+        prevStage: previousSess?.current_stage,
+        newStage: updatedSess.current_stage,
+        prevQIdx: previousSess?.current_question_index,
+        newQIdx: updatedSess.current_question_index,
+        status: updatedSess.status,
+      });
       set({ session: updatedSess });
+      console.log('[SYNC] PlayStore: Zustand session state updated');
 
       if (updatedSess.status === 'completed' || updatedSess.current_stage === 'finished') {
         get().stopListening();
         set({ isCompleted: true });
+        console.log('[SYNC] PlayStore: Quiz completed/finished');
         return;
       }
 
