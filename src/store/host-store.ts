@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
 import { AuthService } from '../services/auth.service';
@@ -8,12 +7,10 @@ import { QuestionService } from '../services/question.service';
 import { SessionService } from '../services/session.service';
 import { ParticipantService } from '../services/participant.service';
 import { AnswerService } from '../services/answer.service';
+import { RealtimeManager } from '../realtime/realtime-manager';
+import { realtimeEvents } from '../realtime/realtime-events';
 
 // ponytail: shared helpers to kill duplicate code across stage transitions
-
-/** Generate a fake UUID to bypass Supabase query cache */
-const cacheBuster = () =>
-  '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
 
 /** Swallow auth refresh errors — we just want to keep the token alive */
 const refreshAuth = async () => { await AuthService.refreshSession(); };
@@ -73,9 +70,7 @@ interface HostState {
 }
 
 export const useHostStore = create<HostState>((set, get) => {
-  let lobbySubscription: any = null;
-  let answerSubscription: any = null;
-  let sessionSubscription: any = null;
+  let realtimeUnsubs: (() => void)[] = [];
   let creationPromise: Promise<string | null> | null = null;
 
   // Mock list of students to simulate real-time joining in offline demo
@@ -336,12 +331,8 @@ export const useHostStore = create<HostState>((set, get) => {
       if (!isMock && (!questions || questions.length === 0)) {
         console.log('nextQuestion: Questions array empty in store. Fetching fallback from database...');
         try {
-          const { data: questionsData } = await supabase
-            .from('questions')
-            .select('*')
-            .eq('quiz_id', session.quiz_id)
-            .neq('id', cacheBuster())
-            .order('order_index', { ascending: true });
+          const res = await QuestionService.getQuestions(session.quiz_id);
+          const questionsData = res.success ? res.data : null;
 
           if (questionsData && questionsData.length > 0) {
             set({ questions: questionsData as Question[] });
@@ -647,133 +638,91 @@ export const useHostStore = create<HostState>((set, get) => {
     },
 
     subscribeToLobby: (sessionId: string) => {
-      if (lobbySubscription) {
-        supabase.removeChannel(lobbySubscription);
-        lobbySubscription = null;
-      }
+      const isMock = checkIsMock();
+      if (isMock) return;
 
-      // Subscribe to changes in the participants table for this session
-      lobbySubscription = supabase
-        .channel(`lobby:${sessionId}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'participants',
-        }, (payload) => {
-          const newPart = payload.new as Participant;
-          if (newPart.session_id !== sessionId) return;
+      RealtimeManager.connectAsHost(sessionId);
 
-          set(state => {
-            if (state.participants.some(p => p.id === newPart.id)) return state;
-            return { participants: [...state.participants, newPart] };
-          });
-        })
-        .subscribe();
+      const unsub = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
+        set(state => {
+          if (state.participants.some(p => p.id === newPart.id)) return state;
+          return { participants: [...state.participants, newPart] };
+        });
+      });
+      realtimeUnsubs.push(unsub);
     },
 
     subscribeToAnswers: (sessionId: string) => {
-      if (answerSubscription) {
-        supabase.removeChannel(answerSubscription);
-        answerSubscription = null;
-      }
+      const isMock = checkIsMock();
+      if (isMock) return;
 
-      answerSubscription = supabase
-        .channel(`answers:${sessionId}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'answers',
-        }, async (payload) => {
-          const newAns = payload.new as Answer;
-          
-          // Verify this answer is for the current question
-          const currentQuestion = get().currentQuestion;
-          if (!currentQuestion || newAns.question_id !== currentQuestion.id) return;
+      RealtimeManager.connectAsHost(sessionId);
 
-          // Verify this answer is for one of our active participants
-          const isParticipant = get().participants.some(p => p.id === newAns.participant_id);
-          if (!isParticipant) return;
+      const unsub = realtimeEvents.on('AnswerSubmitted', async (newAns: Answer) => {
+        // Verify this answer is for the current question
+        const currentQuestion = get().currentQuestion;
+        if (!currentQuestion || newAns.question_id !== currentQuestion.id) return;
 
-          set(state => {
-            if (state.submissions.some(s => s.id === newAns.id)) return state;
-            return { submissions: [...state.submissions, newAns] };
-          });
+        // Verify this answer is for one of our active participants
+        const isParticipant = get().participants.some(p => p.id === newAns.participant_id);
+        if (!isParticipant) return;
 
-          // Fetch the participant's details to update their score on the UI
-          const partRes = await ParticipantService.getParticipantById(newAns.participant_id);
-          const partData = partRes.success ? partRes.data : null;
+        set(state => {
+          if (state.submissions.some(s => s.id === newAns.id)) return state;
+          return { submissions: [...state.submissions, newAns] };
+        });
 
-          if (partData) {
-            set(state => ({
-              participants: state.participants.map(p => p.id === partData.id ? (partData as Participant) : p)
-            }));
-          }
-        })
-        .subscribe();
+        // Fetch the participant's details to update their score on the UI
+        const partRes = await ParticipantService.getParticipantById(newAns.participant_id);
+        const partData = partRes.success ? partRes.data : null;
+
+        if (partData) {
+          set(state => ({
+            participants: state.participants.map(p => p.id === partData.id ? (partData as Participant) : p)
+          }));
+        }
+      });
+      realtimeUnsubs.push(unsub);
     },
 
     subscribeToSession: (sessionId: string) => {
       const isMock = checkIsMock();
       if (isMock) return;
 
-      if (sessionSubscription) {
-        supabase.removeChannel(sessionSubscription);
-        sessionSubscription = null;
-      }
+      RealtimeManager.connectAsHost(sessionId);
 
-      sessionSubscription = supabase
-        .channel(`host_session_updates:${sessionId}`)
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'quiz_sessions',
-          filter: `id=eq.${sessionId}`,
-        }, async (payload) => {
-          console.log('[SYNC] HostStore: Realtime session update', {
-            stage: (payload.new as any)?.current_stage,
-            questionIndex: (payload.new as any)?.current_question_index,
-          });
-          const updatedSess = payload.new as QuizSession;
-          if (updatedSess.id !== sessionId) return;
+      const unsub = realtimeEvents.on('SessionUpdated', async (updatedSess: QuizSession) => {
+        if (updatedSess.id !== sessionId) return;
 
-          const currentQuestion = get().currentQuestion;
-          const questions = get().questions;
-          let activeQuestion = currentQuestion;
-          let activeOptions = get().currentOptions;
+        const currentQuestion = get().currentQuestion;
+        const questions = get().questions;
+        let activeQuestion = currentQuestion;
+        let activeOptions = get().currentOptions;
 
-          if (updatedSess.current_question_index >= 0) {
-            const indexChanged = !currentQuestion || get().activeSession?.current_question_index !== updatedSess.current_question_index;
-            if (indexChanged && questions[updatedSess.current_question_index]) {
-              activeQuestion = questions[updatedSess.current_question_index];
-              const optsRes = await QuestionService.getQuestionOptions(activeQuestion.id);
-              activeOptions = optsRes.success && optsRes.data ? optsRes.data : [];
-            }
+        if (updatedSess.current_question_index >= 0) {
+          const indexChanged = !currentQuestion || get().activeSession?.current_question_index !== updatedSess.current_question_index;
+          if (indexChanged && questions[updatedSess.current_question_index]) {
+            activeQuestion = questions[updatedSess.current_question_index];
+            const optsRes = await QuestionService.getQuestionOptions(activeQuestion.id);
+            activeOptions = optsRes.success && optsRes.data ? optsRes.data : [];
           }
+        }
 
-          set({
-            activeSession: updatedSess,
-            currentQuestion: activeQuestion,
-            currentOptions: activeOptions,
-          });
-        })
-        .subscribe((status, err) => {
-          console.log(`HostStore: Realtime channel status for session ${sessionId}:`, status, err);
+        set({
+          activeSession: updatedSess,
+          currentQuestion: activeQuestion,
+          currentOptions: activeOptions,
         });
+      });
+      realtimeUnsubs.push(unsub);
     },
 
     unsubscribeAll: () => {
-      if (lobbySubscription) {
-        supabase.removeChannel(lobbySubscription);
-        lobbySubscription = null;
-      }
-      if (answerSubscription) {
-        supabase.removeChannel(answerSubscription);
-        answerSubscription = null;
-      }
-      if (sessionSubscription) {
-        supabase.removeChannel(sessionSubscription);
-        sessionSubscription = null;
-      }
+      RealtimeManager.disconnect();
+      realtimeUnsubs.forEach(unsub => {
+        try { unsub(); } catch (_) {}
+      });
+      realtimeUnsubs = [];
     }
   };
 });

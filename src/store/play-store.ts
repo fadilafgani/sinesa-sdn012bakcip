@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
 import { AuthService } from '../services/auth.service';
@@ -9,6 +8,8 @@ import { SessionService } from '../services/session.service';
 import { ParticipantService } from '../services/participant.service';
 import { AnswerService } from '../services/answer.service';
 import { LeaderboardService } from '../services/leaderboard.service';
+import { RealtimeManager } from '../realtime/realtime-manager';
+import { realtimeEvents } from '../realtime/realtime-events';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 
@@ -67,7 +68,7 @@ interface PlayState {
 }
 
 export const usePlayStore = create<PlayState>((set, get) => {
-  let sessionChannel: any = null;
+  let realtimeUnsubs: (() => void)[] = [];
   let joinPromise: Promise<boolean> | null = null;
 
   return {
@@ -202,11 +203,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
         // Supabase Flow
         try {
           // Auto-refresh token if expired
-          try {
-            await supabase.auth.getSession();
-          } catch (e) {
-            console.warn('Failed to refresh session:', e);
-          }
+          await refreshAuth();
 
           // Measure clock drift relative to Supabase API server
           try {
@@ -584,57 +581,19 @@ export const usePlayStore = create<PlayState>((set, get) => {
       }
 
       // Supabase Flow
-      sessionChannel = supabase
-        .channel(`session_updates:${sessionId}`)
-        .on('postgres_changes', {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'quiz_sessions',
-          filter: `id=eq.${sessionId}`,
-        }, async (payload) => {
-          console.log('[SYNC] PlayStore: Realtime event received', {
-            stage: (payload.new as any)?.current_stage,
-            questionIndex: (payload.new as any)?.current_question_index,
-            status: (payload.new as any)?.status,
-          });
-          const updatedSess = payload.new as QuizSession;
-          if (updatedSess.id !== sessionId) return;
-          get().handleSessionUpdate(updatedSess);
-        })
-        .subscribe(async (status, err) => {
-          console.log(`[SYNC] PlayStore: Channel status = ${status}`, err || '');
-          if (status === 'SUBSCRIBED') {
-            // Fresh fetch to catch any events missed during the subscribe handshake
-            try {
-              const freshRes = await SessionService.getSession(sessionId);
-              const freshSession = freshRes.success ? freshRes.data : null;
-              if (freshSession) {
-                const currentSess = get().session;
-                if (currentSess && (
-                  currentSess.current_stage !== freshSession.current_stage ||
-                  currentSess.current_question_index !== freshSession.current_question_index ||
-                  currentSess.status !== freshSession.status
-                )) {
-                  console.log('[SYNC] PlayStore: Caught missed update via fresh fetch', {
-                    oldStage: currentSess.current_stage,
-                    newStage: freshSession.current_stage,
-                  });
-                  get().handleSessionUpdate(freshSession as QuizSession);
-                }
-              }
-            } catch (e) {
-              console.warn('[SYNC] PlayStore: Fresh fetch after subscribe failed:', e);
-            }
-          }
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            console.warn(`[SYNC] PlayStore: Connection issue (${status}). Reconnecting in 3s...`);
-            setTimeout(() => {
-              if (get().session?.id === sessionId) {
-                get().listenToSession(sessionId);
-              }
-            }, 3000);
-          }
-        });
+      RealtimeManager.connectAsStudent(sessionId, get().participant?.id || '');
+
+      const unsubSession = realtimeEvents.on('SessionUpdated', (updatedSess: QuizSession) => {
+        if (updatedSess.id !== sessionId) return;
+        get().handleSessionUpdate(updatedSess);
+      });
+
+      const unsubParticipant = realtimeEvents.on('MyParticipantUpdated', (updatedPart: Participant) => {
+        if (updatedPart.id !== get().participant?.id) return;
+        set({ participant: updatedPart });
+      });
+
+      realtimeUnsubs.push(unsubSession, unsubParticipant);
     },
 
     stopListening: () => {
@@ -643,10 +602,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
         set({ pollingInterval: null });
       }
 
-      if (sessionChannel) {
-        supabase.removeChannel(sessionChannel);
-        sessionChannel = null;
-      }
+      RealtimeManager.disconnect();
+      realtimeUnsubs.forEach(unsub => {
+        try { unsub(); } catch (_) {}
+      });
+      realtimeUnsubs = [];
     },
 
     leaveSession: () => {
