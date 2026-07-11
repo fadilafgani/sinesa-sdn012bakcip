@@ -9,6 +9,7 @@ import { ParticipantService } from '../services/participant.service';
 import { AnswerService } from '../services/answer.service';
 import { RealtimeManager } from '../realtime/realtime-manager';
 import { realtimeEvents } from '../realtime/realtime-events';
+import type { RealtimeStatus } from '../realtime/realtime-types';
 
 // ponytail: shared helpers to kill duplicate code across stage transitions
 
@@ -50,6 +51,7 @@ interface HostState {
   submissions: Answer[];
   loading: boolean;
   virtualStudentIntervals: number[];
+  realtimeStatus: RealtimeStatus;
 
   createSession: (quizId: string) => Promise<string | null>; // Returns PIN
   startQuiz: () => Promise<void>;
@@ -86,6 +88,7 @@ export const useHostStore = create<HostState>((set, get) => {
     submissions: [],
     loading: false,
     virtualStudentIntervals: [],
+    realtimeStatus: 'DISCONNECTED',
 
     createSession: async (quizId: string) => {
       if (creationPromise) {
@@ -643,13 +646,26 @@ export const useHostStore = create<HostState>((set, get) => {
 
       RealtimeManager.connectAsHost(sessionId);
 
-      const unsub = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
+      const unsubJoined = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
         set(state => {
           if (state.participants.some(p => p.id === newPart.id)) return state;
           return { participants: [...state.participants, newPart] };
         });
       });
-      realtimeUnsubs.push(unsub);
+
+      const unsubUpdated = realtimeEvents.on('ParticipantUpdated', (updatedPart: Participant) => {
+        set(state => ({
+          participants: state.participants.map(p => p.id === updatedPart.id ? updatedPart : p)
+        }));
+      });
+
+      const unsubLeft = realtimeEvents.on('ParticipantLeft', (leftPart: Participant) => {
+        set(state => ({
+          participants: state.participants.filter(p => p.id !== leftPart.id)
+        }));
+      });
+
+      realtimeUnsubs.push(unsubJoined, unsubUpdated, unsubLeft);
     },
 
     subscribeToAnswers: (sessionId: string) => {
@@ -658,7 +674,7 @@ export const useHostStore = create<HostState>((set, get) => {
 
       RealtimeManager.connectAsHost(sessionId);
 
-      const unsub = realtimeEvents.on('AnswerSubmitted', async (newAns: Answer) => {
+      const unsub = realtimeEvents.on('AnswerSubmitted', (newAns: Answer) => {
         // Verify this answer is for the current question
         const currentQuestion = get().currentQuestion;
         if (!currentQuestion || newAns.question_id !== currentQuestion.id) return;
@@ -671,16 +687,6 @@ export const useHostStore = create<HostState>((set, get) => {
           if (state.submissions.some(s => s.id === newAns.id)) return state;
           return { submissions: [...state.submissions, newAns] };
         });
-
-        // Fetch the participant's details to update their score on the UI
-        const partRes = await ParticipantService.getParticipantById(newAns.participant_id);
-        const partData = partRes.success ? partRes.data : null;
-
-        if (partData) {
-          set(state => ({
-            participants: state.participants.map(p => p.id === partData.id ? (partData as Participant) : p)
-          }));
-        }
       });
       realtimeUnsubs.push(unsub);
     },
@@ -690,6 +696,10 @@ export const useHostStore = create<HostState>((set, get) => {
       if (isMock) return;
 
       RealtimeManager.connectAsHost(sessionId);
+
+      RealtimeManager.onStatusChange((status) => {
+        set({ realtimeStatus: status });
+      });
 
       const unsub = realtimeEvents.on('SessionUpdated', async (updatedSess: QuizSession) => {
         if (updatedSess.id !== sessionId) return;

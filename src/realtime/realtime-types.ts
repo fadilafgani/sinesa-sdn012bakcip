@@ -3,9 +3,12 @@ export type RealtimeStatus = 'CONNECTED' | 'CONNECTING' | 'RECONNECTING' | 'DISC
 export type RealtimeEvent =
   | 'SessionUpdated'
   | 'ParticipantJoined'
+  | 'ParticipantLeft'
   | 'AnswerSubmitted'
   | 'ParticipantUpdated'
   | 'MyParticipantUpdated'
   | 'StageChanged'
   | 'QuestionChanged'
+  | 'TimerUpdated'
+  | 'LeaderboardUpdated'
   | 'QuizFinished';

@@ -56,19 +56,30 @@ export class RealtimeChannelManager {
         filter: `id=eq.${sessionId}`,
       },
       (payload) => {
-        logRealtime('Session Updated event', payload.new);
+        logRealtime('Realtime Event: Session Updated');
+        logRealtime('Session Updated', payload.new);
         realtimeEvents.emit('SessionUpdated', payload.new);
 
         const oldStage = payload.old ? (payload.old as any).current_stage : null;
         const newStage = (payload.new as any).current_stage;
         if (oldStage !== newStage) {
+          logRealtime('Stage Updated', newStage);
           realtimeEvents.emit('StageChanged', newStage);
         }
 
         const oldIdx = payload.old ? (payload.old as any).current_question_index : null;
         const newIdx = (payload.new as any).current_question_index;
         if (oldIdx !== newIdx) {
+          logRealtime('Question Updated', newIdx);
           realtimeEvents.emit('QuestionChanged', newIdx);
+        }
+
+        const oldStart = payload.old ? (payload.old as any).question_started_at : null;
+        const newStart = (payload.new as any).question_started_at;
+        const oldExpire = payload.old ? (payload.old as any).question_expires_at : null;
+        const newExpire = (payload.new as any).question_expires_at;
+        if (oldStart !== newStart || oldExpire !== newExpire) {
+          realtimeEvents.emit('TimerUpdated', { started_at: newStart, expires_at: newExpire });
         }
 
         if (newStage === 'finished') {
@@ -86,19 +97,24 @@ export class RealtimeChannelManager {
         table: 'participants',
       },
       (payload) => {
-        const part = payload.new as Participant;
+        const part = (payload.new || payload.old) as Participant;
         if (!part || part.session_id !== sessionId) return;
 
         if (payload.eventType === 'INSERT') {
           logRealtime('Participant Joined event', part);
           realtimeEvents.emit('ParticipantJoined', part);
         } else if (payload.eventType === 'UPDATE') {
-          logRealtime('Participant Updated event', part);
+          logRealtime('Realtime Event: Participant Updated', part);
           realtimeEvents.emit('ParticipantUpdated', part);
+          logRealtime('Leaderboard Updated', part);
+          realtimeEvents.emit('LeaderboardUpdated', part);
           
           if (part.id === this.participantId) {
             realtimeEvents.emit('MyParticipantUpdated', part);
           }
+        } else if (payload.eventType === 'DELETE') {
+          logRealtime('Participant Left event', part);
+          realtimeEvents.emit('ParticipantLeft', part);
         }
       }
     );

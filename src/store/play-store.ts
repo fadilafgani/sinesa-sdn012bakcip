@@ -10,6 +10,7 @@ import { AnswerService } from '../services/answer.service';
 import { LeaderboardService } from '../services/leaderboard.service';
 import { RealtimeManager } from '../realtime/realtime-manager';
 import { realtimeEvents } from '../realtime/realtime-events';
+import type { RealtimeStatus } from '../realtime/realtime-types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 
@@ -38,6 +39,7 @@ interface PlayState {
   error: string | null;
   pollingInterval: number | null;
   serverTimeOffset: number; // localTime - serverTime
+  realtimeStatus: RealtimeStatus;
 
   // Self-paced quiz mode state
   questions: Question[];
@@ -84,6 +86,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
     error: null,
     pollingInterval: null,
     serverTimeOffset: 0,
+    realtimeStatus: 'DISCONNECTED',
 
     // Self-paced defaults
     questions: [],
@@ -582,6 +585,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
       // Supabase Flow
       RealtimeManager.connectAsStudent(sessionId, get().participant?.id || '');
+
+      RealtimeManager.onStatusChange((status) => {
+        set({ realtimeStatus: status });
+      });
 
       const unsubSession = realtimeEvents.on('SessionUpdated', (updatedSess: QuizSession) => {
         if (updatedSess.id !== sessionId) return;

@@ -73,11 +73,14 @@ export const RealtimeManager = {
 // Wire up state recovery automatically on reconnection success
 realtimeChannelManager.setStatusCallback((status) => {
   if (status === 'CONNECTED') {
-    logRealtime('WS connected, performing fresh fetch for recovery');
+    logRealtime('Realtime Connected');
     const sessId = realtimeChannelManager.sessionId;
     const partId = realtimeChannelManager.participantId;
     if (sessId) {
+      logRealtime('Realtime Reconnected');
       RealtimeManager.recoverSessionState(sessId, partId || undefined);
     }
+  } else if (status === 'DISCONNECTED') {
+    logRealtime('Realtime Disconnected');
   }
 });
