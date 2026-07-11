@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
-import { supabase } from '../../lib/supabase';
+import { AuthService } from '../../services/auth.service';
+import { SettingsService } from '../../services/settings.service';
 import type { UserRole } from '../../types';
 import { motion } from 'framer-motion';
 import { KeyRound, Mail, User, Shield, GraduationCap, School, AlertCircle, CheckCircle } from 'lucide-react';
@@ -38,13 +39,10 @@ export const Login: React.FC = () => {
         }
       } else {
         try {
-          const { data, error } = await supabase
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'registration_enabled')
-            .single();
-          if (!error && data) {
-            setRegistrationEnabled(data.value !== 'false');
+          const res = await SettingsService.getSystemSettings();
+          if (res.success && res.data) {
+            const regSetting = res.data.find(s => s.key === 'registration_enabled');
+            setRegistrationEnabled(!regSetting || regSetting.value !== 'false');
           } else {
             setRegistrationEnabled(true);
           }
@@ -135,18 +133,9 @@ export const Login: React.FC = () => {
     // Supabase Online Auth Flow
     try {
       if (isSignUp) {
-        const { data, error: signUpErr } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              role,
-              full_name: fullName,
-            },
-          },
-        });
-
-        if (signUpErr) throw signUpErr;
+        const signUpRes = await AuthService.signUp(email, password, role, fullName);
+        if (!signUpRes.success) throw signUpRes.error;
+        const data = signUpRes.data;
 
         if (data.user) {
           if (data.session) {
@@ -166,20 +155,14 @@ export const Login: React.FC = () => {
           }
         }
       } else {
-        const { data, error: signInErr } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        if (signInErr) throw signInErr;
+        const signInRes = await AuthService.signIn(email, password);
+        if (!signInRes.success) throw signInRes.error;
+        const data = signInRes.data;
 
         if (data.user) {
           // Fetch profile to route correctly
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('role')
-            .eq('id', data.user.id)
-            .single();
+          const profileRes = await AuthService.getOrCreateProfile(data.user);
+          const profile = profileRes.success ? profileRes.data : null;
 
           const userRole = profile?.role || 'student';
           

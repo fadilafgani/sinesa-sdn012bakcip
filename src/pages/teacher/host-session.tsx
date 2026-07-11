@@ -9,7 +9,8 @@ import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check } fro
 import { LatexRenderer } from '../../components/latex-renderer';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { showConfirm, showError } from '../../lib/swal';
-import { supabase } from '../../lib/supabase';
+import { QuizService } from '../../services/quiz.service';
+import { AuthService } from '../../services/auth.service';
 import { LazyImage } from '../../components/lazy-image';
 import { getSafeMediaUrl } from '../../lib/media';
 
@@ -92,16 +93,9 @@ export const HostSession: React.FC = () => {
         }
       } else {
         try {
-          try {
-            await supabase.auth.getSession();
-          } catch (e) {}
-          const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-          const { data: quizData } = await supabase
-            .from('quizzes')
-            .select('teacher_id')
-            .eq('id', quizId)
-            .neq('id', cacheBuster)
-            .single();
+          await AuthService.refreshSession();
+          const quizRes = await QuizService.getQuizById(quizId);
+          const quizData = quizRes.data;
           if (quizData) {
             if (quizData.teacher_id !== profile?.id) {
               showError('Akses Ditolak', 'Anda tidak memiliki hak untuk memandu kuis ini!');
@@ -124,14 +118,8 @@ export const HostSession: React.FC = () => {
           setPinCode(targetQuiz?.pin_code || '');
         } else {
           try {
-            const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-            const { data: quizData } = await supabase
-              .from('quizzes')
-              .select('pin_code')
-              .eq('id', quizId)
-              .neq('id', cacheBuster)
-              .single();
-            setPinCode(quizData?.pin_code || '');
+            const quizRes = await QuizService.getQuizById(quizId);
+            setPinCode(quizRes.data?.pin_code || '');
           } catch (err) {
             console.error('HostSession error fetching quiz pin:', err);
           }

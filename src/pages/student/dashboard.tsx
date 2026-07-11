@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
 import { usePlayStore } from '../../store/play-store';
-import { supabase } from '../../lib/supabase';
+import { AuthService } from '../../services/auth.service';
+import { QuestionService } from '../../services/question.service';
+import { AnswerService } from '../../services/answer.service';
+import { ParticipantService } from '../../services/participant.service';
 import { ThemeToggle } from '../../components/theme-toggle';
 import { getSafeMediaUrl } from '../../lib/media';
 import { 
@@ -167,24 +170,12 @@ export const StudentDashboard: React.FC = () => {
     }
 
     // Auto-refresh token if expired
-    try { await supabase.auth.getSession(); } catch (e) {}
+    await AuthService.refreshSession();
 
     try {
-      const { data: partData, error: partErr } = await supabase
-        .from('participants')
-        .select(`
-          *,
-          quiz_sessions (
-            *,
-            quizzes (
-              *
-            )
-          )
-        `)
-        .eq('id', item.id)
-        .single();
-
-      if (partErr) throw partErr;
+      const partRes = await ParticipantService.getParticipantWithQuizDetails(item.id);
+      if (!partRes.success || !partRes.data) throw partRes.error || new Error('Data tidak ditemukan');
+      const partData = partRes.data;
 
       const session = partData.quiz_sessions;
       const quiz = session?.quizzes;
@@ -193,23 +184,16 @@ export const StudentDashboard: React.FC = () => {
         throw new Error('Data kuis tidak ditemukan.');
       }
 
-      const { data: qData, error: qErr } = await supabase
-        .from('questions')
-        .select('*')
-        .eq('quiz_id', quiz.id)
-        .order('order_index', { ascending: true });
-
-      if (qErr) throw qErr;
+      const qRes = await QuestionService.getQuestions(quiz.id);
+      if (!qRes.success || !qRes.data) throw qRes.error || new Error('Gagal memuat soal');
+      const qData = qRes.data;
 
       const qIds = qData.map((q: any) => q.id);
       let groupedOptions: Record<string, any[]> = {};
       if (qIds.length > 0) {
-        const { data: optData, error: optErr } = await supabase
-          .from('options')
-          .select('*')
-          .in('question_id', qIds);
-        if (optErr) throw optErr;
-        optData.forEach((opt: any) => {
+        const optRes = await QuestionService.getOptionsForQuestions(qIds);
+        if (!optRes.success || !optRes.data) throw optRes.error || new Error('Gagal memuat opsi');
+        optRes.data.forEach((opt: any) => {
           if (!groupedOptions[opt.question_id]) {
             groupedOptions[opt.question_id] = [];
           }
@@ -217,12 +201,9 @@ export const StudentDashboard: React.FC = () => {
         });
       }
 
-      const { data: ansData, error: ansErr } = await supabase
-        .from('answers')
-        .select('*')
-        .eq('participant_id', item.id);
-
-      if (ansErr) throw ansErr;
+      const ansRes = await AnswerService.getParticipantAnswers(item.id);
+      if (!ansRes.success || !ansRes.data) throw ansRes.error || new Error('Gagal memuat jawaban');
+      const ansData = ansRes.data;
 
       const answersMap: Record<string, any> = {};
       ansData?.forEach((ans: any) => {
@@ -266,35 +247,11 @@ export const StudentDashboard: React.FC = () => {
       setLoadingHistory(true);
       try {
         // Auto-refresh token if expired
-        try {
-          await supabase.auth.getSession();
-        } catch (e) {
-          console.warn('Failed to refresh session:', e);
-        }
+        await AuthService.refreshSession();
 
-        const { data, error } = await supabase
-          .from('participants')
-          .select(`
-            id,
-            score,
-            joined_at,
-            quiz_sessions!inner(
-              id,
-              completed_at,
-              show_final_result,
-              show_answer_review,
-              quizzes!inner(
-                id,
-                title
-              )
-            ),
-            answers(
-              id,
-              is_correct
-            )
-          `)
-          .eq('student_id', profile.id)
-          .order('joined_at', { ascending: false });
+        const historyRes = await ParticipantService.getStudentHistory(profile.id);
+        const data = historyRes.data;
+        const error = historyRes.error;
 
         if (error) {
           console.error('Error fetching student history:', error);

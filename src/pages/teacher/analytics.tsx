@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
-import { supabase } from '../../lib/supabase';
+import { QuizService } from '../../services/quiz.service';
+import { SessionService } from '../../services/session.service';
+import { ParticipantService } from '../../services/participant.service';
+import { QuestionService } from '../../services/question.service';
+import { AnswerService } from '../../services/answer.service';
 import type { Quiz, Answer } from '../../types';
 import { exportToCSV, exportToPDF } from '../../lib/export';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
@@ -92,11 +96,8 @@ export const Analytics: React.FC = () => {
 
       // Online Supabase flow
       try {
-        const { data: quizData } = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('id', quizId)
-          .single();
+        const quizRes = await QuizService.getQuizById(quizId);
+        const quizData = quizRes.data;
 
         if (quizData) {
           if (quizData.teacher_id !== profile?.id) {
@@ -107,35 +108,26 @@ export const Analytics: React.FC = () => {
           setQuiz(quizData as Quiz);
 
           // Get active or completed sessions for this quiz
-          const { data: sessions } = await supabase
-            .from('quiz_sessions')
-            .select('id')
-            .eq('quiz_id', quizId);
+          const sessionIdsRes = await SessionService.getQuizSessionIds(quizId);
+          const sessions = sessionIdsRes.data;
 
           if (sessions && sessions.length > 0) {
             const sessionIds = sessions.map(s => s.id);
 
             // Fetch participants
-            const { data: participants } = await supabase
-              .from('participants')
-              .select('*')
-              .in('session_id', sessionIds);
+            const participantsRes = await ParticipantService.getParticipantsBySessionIds(sessionIds);
+            const participants = participantsRes.data;
 
             // Fetch questions
-            const { data: questions } = await supabase
-              .from('questions')
-              .select('*')
-              .eq('quiz_id', quizId)
-              .order('order_index', { ascending: true });
+            const questionsRes = await QuestionService.getQuestions(quizId);
+            const questions = questionsRes.data;
 
             if (participants && participants.length > 0 && questions) {
               const partIds = participants.map(p => p.id);
               
               // Fetch answers
-              const { data: answers } = await supabase
-                .from('answers')
-                .select('*')
-                .in('participant_id', partIds);
+              const answersRes = await AnswerService.getAnswersByParticipantIds(partIds);
+              const answers = answersRes.data;
 
               const activeAnswers = (answers as Answer[]) || [];
 

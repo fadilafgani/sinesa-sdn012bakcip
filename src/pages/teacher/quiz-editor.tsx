@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { QuizService } from '../../services/quiz.service';
+import { QuestionService } from '../../services/question.service';
+import { AuthService } from '../../services/auth.service';
 import { useAuthStore, checkIsMock } from '../../store/auth-store';
-import { supabase } from '../../lib/supabase';
 import type { Quiz, Question, Option } from '../../types';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -219,11 +221,8 @@ export const QuizEditor: React.FC = () => {
 
       // Supabase Online Load
       try {
-        const { data: quiz } = await supabase
-          .from('quizzes')
-          .select('*')
-          .eq('id', quizId)
-          .single();
+        const quizRes = await QuizService.getQuizById(quizId);
+        const quiz = quizRes.success ? quizRes.data : null;
 
         if (quiz) {
           if (quiz.teacher_id !== profile?.id) {
@@ -231,19 +230,14 @@ export const QuizEditor: React.FC = () => {
             navigate('/teacher/dashboard');
             return;
           }
-          const { data: rawQs } = await supabase
-            .from('questions')
-            .select('*')
-            .eq('quiz_id', quizId)
-            .order('order_index', { ascending: true });
+          const qsRes = await QuestionService.getQuestions(quizId);
+          const rawQs = qsRes.success ? qsRes.data : [];
 
           const formattedQuestions = [];
           if (rawQs) {
             for (const q of rawQs) {
-              const { data: rawOpts } = await supabase
-                .from('options')
-                .select('*')
-                .eq('question_id', q.id);
+              const optsRes = await QuestionService.getQuestionOptions(q.id);
+              const rawOpts = optsRes.success ? optsRes.data : [];
 
               formattedQuestions.push({
                 id: q.id,
@@ -501,7 +495,8 @@ export const QuizEditor: React.FC = () => {
 
     // Online Supabase Flow
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const userRes = await AuthService.getSession();
+      const user = userRes.data?.session?.user;
       if (!user) throw new Error('Unauthorized');
 
       const id = quizId || crypto.randomUUID();
@@ -535,68 +530,60 @@ export const QuizEditor: React.FC = () => {
       let quizUpsertError = null;
       if (quizId) {
         // Update quiz details
-        const { error } = await supabase
-          .from('quizzes')
-          .update({
-            title: values.title,
-            description: values.description || null,
-            opening_text: values.opening_text || null,
-            closing_text: values.closing_text || null,
-            duration_per_question: values.duration_per_question,
-            random_questions: values.random_questions,
-            random_options: values.random_options,
-            thumbnail_url: values.thumbnail_url || null,
-            quiz_mode: values.quiz_mode,
-            lives_count: values.lives_count,
-            show_final_result: values.show_final_result,
-            show_leaderboard: values.show_leaderboard,
-            show_correct_answer: values.show_correct_answer,
-            show_answer_review: values.show_answer_review,
-            show_question_result: values.show_question_result,
-            show_explanation: values.show_explanation,
-            show_score_per_question: values.show_score_per_question,
-            show_question_statistics: values.show_question_statistics,
-            anti_cheat_enabled: values.anti_cheat_enabled,
-            fullscreen_required: values.fullscreen_required,
-            auto_submit_on_violation: values.auto_submit_on_violation,
-          })
-          .eq('id', quizId);
-        quizUpsertError = error;
+        const updateRes = await QuizService.updateQuiz(quizId, {
+          title: values.title,
+          description: values.description || null,
+          opening_text: values.opening_text || null,
+          closing_text: values.closing_text || null,
+          duration_per_question: values.duration_per_question,
+          random_questions: values.random_questions,
+          random_options: values.random_options,
+          thumbnail_url: values.thumbnail_url || null,
+          quiz_mode: values.quiz_mode,
+          lives_count: values.lives_count,
+          show_final_result: values.show_final_result,
+          show_leaderboard: values.show_leaderboard,
+          show_correct_answer: values.show_correct_answer,
+          show_answer_review: values.show_answer_review,
+          show_question_result: values.show_question_result,
+          show_explanation: values.show_explanation,
+          show_score_per_question: values.show_score_per_question,
+          show_question_statistics: values.show_question_statistics,
+          anti_cheat_enabled: values.anti_cheat_enabled,
+          fullscreen_required: values.fullscreen_required,
+          auto_submit_on_violation: values.auto_submit_on_violation,
+        });
+        quizUpsertError = updateRes.error;
       } else {
         // Insert new quiz details
-        const { error } = await supabase
-          .from('quizzes')
-          .insert(newQuiz);
-        quizUpsertError = error;
+        const createRes = await QuizService.createQuiz(newQuiz);
+        quizUpsertError = createRes.error;
       }
 
       if (quizUpsertError) throw quizUpsertError;
 
       // Delete existing questions for updates to handle modifications
       if (quizId) {
-        await supabase.from('questions').delete().eq('quiz_id', quizId);
+        await QuestionService.deleteQuestionsByQuizId(quizId);
       }
 
       // Add/Re-add questions and options
       for (let i = 0; i < values.questions.length; i++) {
         const q = values.questions[i];
         
-        const { data: insertedQuestion, error: qErr } = await supabase
-          .from('questions')
-          .insert({
-            quiz_id: id,
-            question_text: q.question_text,
-            question_type: q.question_type || 'multiple_choice',
-            media_type: q.media_type,
-            media_url: q.media_url || null,
-            points: q.points,
-            explanation: q.explanation || null,
-            order_index: i
-          })
-          .select()
-          .single();
+        const qRes = await QuestionService.createQuestion({
+          quiz_id: id,
+          question_text: q.question_text,
+          question_type: q.question_type || 'multiple_choice',
+          media_type: q.media_type,
+          media_url: q.media_url || null,
+          points: q.points,
+          explanation: q.explanation || null,
+          order_index: i
+        });
 
-        if (qErr) throw qErr;
+        if (!qRes.success || !qRes.data) throw qRes.error || new Error('Gagal menyimpan soal');
+        const insertedQuestion = qRes.data;
 
         // Insert options
         const optionRows = q.options.map(o => ({
@@ -606,11 +593,9 @@ export const QuizEditor: React.FC = () => {
           match_text: o.match_text || null
         }));
 
-        const { error: optErr } = await supabase
-          .from('options')
-          .insert(optionRows);
+        const optsRes = await QuestionService.createOptions(optionRows);
 
-        if (optErr) throw optErr;
+        if (!optsRes.success) throw optsRes.error;
       }
 
       setMessage({ type: 'success', text: 'Kuis berhasil disimpan ke Cloud Supabase!' });

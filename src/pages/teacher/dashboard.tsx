@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/auth-store';
-import { supabase } from '../../lib/supabase';
+import { QuizService } from '../../services/quiz.service';
+import { AuthService } from '../../services/auth.service';
 import type { Quiz } from '../../types';
 import { getSafeMediaUrl } from '../../lib/media';
 import { Plus, Edit2, Play, BarChart2, Trash2, LogOut, BookOpen, Clock, Layers } from 'lucide-react';
@@ -183,25 +184,16 @@ export const TeacherDashboard: React.FC = () => {
       console.log('TeacherDashboard: fetchQuizzes starting, profile id =', profile?.id);
       
       // Auto-refresh token if expired
-      try {
-        await supabase.auth.getSession();
-      } catch (e) {
-        console.warn('Failed to refresh session:', e);
-      }
+      await AuthService.refreshSession();
 
-      const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-      const { data, error } = await supabase
-        .from('quizzes')
-        .select('*')
-        .eq('teacher_id', profile?.id)
-        .neq('id', cacheBuster)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('TeacherDashboard: Supabase error fetching quizzes:', error);
-      } else if (data) {
-        console.log('TeacherDashboard: successfully fetched quizzes count =', data.length);
-        setQuizzes(data as Quiz[]);
+      if (profile?.id) {
+        const res = await QuizService.getQuizzesByTeacherId(profile.id);
+        if (!res.success) {
+          console.error('TeacherDashboard: error fetching quizzes:', res.error);
+        } else if (res.data) {
+          console.log('TeacherDashboard: successfully fetched quizzes count =', res.data.length);
+          setQuizzes(res.data);
+        }
       }
     } catch (err) {
       console.error('Error fetching quizzes:', err);
@@ -239,16 +231,13 @@ export const TeacherDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('quizzes')
-        .delete()
-        .eq('id', quizId);
+      const res = await QuizService.deleteQuiz(quizId);
 
-      if (!error) {
+      if (res.success) {
         setQuizzes(quizzes.filter(q => q.id !== quizId));
         showSuccess('Berhasil', 'Kuis telah dihapus secara permanen.');
       } else {
-        showError('Gagal', `Gagal menghapus kuis: ${error.message}`);
+        showError('Gagal', `Gagal menghapus kuis: ${res.error?.message || 'Unknown error'}`);
       }
     } catch (err: any) {
       console.error('Error deleting quiz:', err);

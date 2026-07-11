@@ -2,13 +2,17 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
+import { AuthService } from '../services/auth.service';
+import { QuizService } from '../services/quiz.service';
+import { QuestionService } from '../services/question.service';
+import { SessionService } from '../services/session.service';
+import { ParticipantService } from '../services/participant.service';
+import { AnswerService } from '../services/answer.service';
+import { LeaderboardService } from '../services/leaderboard.service';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 
-// ponytail: shared helpers to kill duplicate code
-const cacheBuster = () =>
-  '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-const refreshAuth = async () => { try { await supabase.auth.getSession(); } catch (_) {} };
+const refreshAuth = async () => { await AuthService.refreshSession(); };
 
 /** Fetch options for a question. Used by joinSession, handleQuestionChange, setQuestionProgress. */
 async function fetchOptionsById(questionId: string): Promise<Option[]> {
@@ -16,13 +20,8 @@ async function fetchOptionsById(questionId: string): Promise<Option[]> {
     const raw = localStorage.getItem(`options_${questionId}`);
     return raw ? JSON.parse(raw) : [];
   }
-  const { data, error } = await supabase
-    .from('options')
-    .select('*')
-    .eq('question_id', questionId)
-    .neq('id', cacheBuster());
-  if (error) throw error;
-  return (data as Option[]) || [];
+  const res = await QuestionService.getQuestionOptions(questionId);
+  return res.success && res.data ? res.data : [];
 }
 
 interface PlayState {
@@ -226,123 +225,78 @@ export const usePlayStore = create<PlayState>((set, get) => {
             console.warn('Failed to calculate server clock offset:', e);
           }
 
-          const cacheBusterSess = cacheBuster();
           // 1. Get quiz by pin
-          let { data: quizData, error: quizErr } = await supabase
-            .from('quizzes')
-            .select('*')
-            .eq('pin_code', pinCode)
-            .neq('id', cacheBusterSess)
-            .single();
+          let quizRes = await QuizService.getQuizByPin(pinCode);
+          let quizData = quizRes.data;
 
-          if (quizErr || !quizData) {
+          if (!quizRes.success || !quizData) {
             console.log('joinSession: Quiz not found on first try, retrying in 1s...');
             await new Promise(resolve => setTimeout(resolve, 1000));
-            const retryRes = await supabase
-              .from('quizzes')
-              .select('*')
-              .eq('pin_code', pinCode)
-              .neq('id', cacheBusterSess)
-              .single();
+            const retryRes = await QuizService.getQuizByPin(pinCode);
             quizData = retryRes.data;
-            quizErr = retryRes.error;
           }
 
-          if (quizErr || !quizData) {
+          if (!quizData) {
             set({ error: 'Kode PIN kuis tidak ditemukan.', loading: false });
             return false;
           }
 
           // 2. Get active session
-          let { data: sessionData, error: sessionErr } = await supabase
-            .from('quiz_sessions')
-            .select('*')
-            .eq('quiz_id', quizData.id)
-            .in('status', ['lobby', 'active'])
-            .neq('id', cacheBusterSess)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
+          let sessionRes = await SessionService.getLatestActiveSession(quizData.id);
+          let sessionData = sessionRes.data;
 
-          if (sessionErr || !sessionData) {
+          if (!sessionRes.success || !sessionData) {
             console.log('joinSession: Session not found on first try, retrying in 1s...');
             await new Promise(resolve => setTimeout(resolve, 1000));
-            const retrySess = await supabase
-              .from('quiz_sessions')
-              .select('*')
-              .eq('quiz_id', quizData.id)
-              .in('status', ['lobby', 'active'])
-              .neq('id', cacheBusterSess)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .single();
+            const retrySess = await SessionService.getLatestActiveSession(quizData.id);
             sessionData = retrySess.data;
-            sessionErr = retrySess.error;
           }
 
-          if (sessionErr || !sessionData) {
+          if (!sessionData) {
             set({ error: 'Kuis belum aktif atau sudah selesai.', loading: false });
             return false;
           }
 
           // 3. Check if participant already exists in this session
-          const { data: existingPart } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('session_id', sessionData.id)
-            .eq('display_name', displayName)
-            .maybeSingle();
-
-          let partData = existingPart;
+          const existingPartRes = await ParticipantService.getParticipantBySessionAndName(sessionData.id, displayName);
+          let partData = existingPartRes.success ? existingPartRes.data : null;
 
           if (!partData) {
             // Create participant
-            let { data: newPart, error: partErr } = await supabase
-              .from('participants')
-              .insert({
-                session_id: sessionData.id,
-                student_id: studentId || null,
-                display_name: displayName,
-                score: 0,
-                lives: quizData.lives_count !== undefined ? quizData.lives_count : 3,
-                skipped_questions: [],
-                question_status: {},
-                current_progress: 0,
-                violation_count: 0,
-                is_completed: false,
-              })
-              .select()
-              .single();
+            const insertPayload = {
+              session_id: sessionData.id,
+              student_id: studentId || null,
+              display_name: displayName,
+              score: 0,
+              lives: quizData.lives_count !== undefined ? quizData.lives_count : 3,
+              skipped_questions: [],
+              question_status: {},
+              current_progress: 0,
+              violation_count: 0,
+              is_completed: false,
+            };
+
+            let joinRes = await ParticipantService.joinParticipant(insertPayload);
+            let newPart = joinRes.data;
+            let partErr = joinRes.error;
 
             // Robust Fallback: If foreign key or other constraint error, retry without student_id
             if (partErr && studentId) {
               console.warn('Failed to insert participant with student_id, retrying without student_id:', partErr);
-              const { data: retryPart, error: retryErr } = await supabase
-                .from('participants')
-                .insert({
-                  session_id: sessionData.id,
-                  student_id: null,
-                  display_name: displayName,
-                  score: 0,
-                  lives: quizData.lives_count !== undefined ? quizData.lives_count : 3,
-                  skipped_questions: [],
-                  question_status: {},
-                  current_progress: 0,
-                  violation_count: 0,
-                  is_completed: false,
-                })
-                .select()
-                .single();
-              newPart = retryPart;
-              partErr = retryErr;
+              const retryJoinRes = await ParticipantService.joinParticipant({
+                ...insertPayload,
+                student_id: null,
+              });
+              newPart = retryJoinRes.data;
+              partErr = retryJoinRes.error;
             }
 
-            if (partErr) {
-              const isUniqueViolation = partErr.code === '23505';
+            if (partErr || !newPart) {
+              const isUniqueViolation = partErr && partErr.code === '23505';
               set({ 
                 error: isUniqueViolation 
                   ? 'Nama tampilan sudah digunakan di lobby ini.' 
-                  : `Gagal bergabung: ${partErr.message} (Code: ${partErr.code})`, 
+                  : `Gagal bergabung: ${partErr?.message || 'Unknown error'}`, 
                 loading: false 
               });
               return false;
@@ -356,34 +310,20 @@ export const usePlayStore = create<PlayState>((set, get) => {
             }
             // Update student_id if it wasn't set
             if (studentId && !partData.student_id) {
-              const { data: updatedPart, error: updateErr } = await supabase
-                .from('participants')
-                .update({ student_id: studentId })
-                .eq('id', partData.id)
-                .select()
-                .single();
-              
-              if (!updateErr && updatedPart) {
-                partData = updatedPart;
+              const updateRes = await ParticipantService.updateParticipant(partData.id, { student_id: studentId });
+              if (updateRes.success && updateRes.data) {
+                partData = updateRes.data;
               }
             }
           }
 
           // Fetch all questions of the quiz
-          const { data: questions } = await supabase
-            .from('questions')
-            .select('*')
-            .eq('quiz_id', sessionData.quiz_id)
-            .neq('id', cacheBuster())
-            .order('order_index', { ascending: true });
-
-          const loadedQs = (questions as Question[]) || [];
+          const questionsRes = await QuestionService.getQuestions(sessionData.quiz_id);
+          const loadedQs = questionsRes.success && questionsRes.data ? questionsRes.data : [];
 
           // Fetch participant answers
-          const { data: answersData } = await supabase
-            .from('answers')
-            .select('*')
-            .eq('participant_id', partData.id);
+          const answersRes = await AnswerService.getParticipantAnswers(partData.id);
+          const answersData = answersRes.success ? answersRes.data : [];
           
           const map: Record<string, Answer> = {};
           if (answersData) {
@@ -547,32 +487,28 @@ export const usePlayStore = create<PlayState>((set, get) => {
       }
 
       try {
-        const { error: insertErr } = await supabase
-          .from('answers')
-          .insert({
-            participant_id: participant.id,
-            question_id: currentQuestion.id,
-            selected_option_id: optionIdToSave,
-            selected_option_ids: optionIdsToSave,
-            matching_answers: matchingAnswersToSave,
-            is_correct: isCorrect,
-            response_time_ms: responseTime,
-            score_awarded: scoreAwarded,
-          });
+        const insertRes = await AnswerService.submitAnswer({
+          participant_id: participant.id,
+          question_id: currentQuestion.id,
+          selected_option_id: optionIdToSave,
+          selected_option_ids: optionIdsToSave,
+          matching_answers: matchingAnswersToSave,
+          is_correct: isCorrect,
+          response_time_ms: responseTime,
+          score_awarded: scoreAwarded,
+        });
 
-        if (insertErr) throw insertErr;
+        if (!insertRes.success) throw insertRes.error;
 
         const newScore = participant.score + scoreAwarded;
-        const { data: updatedPart } = await supabase
-          .from('participants')
-          .update({
-            score: newScore,
-            lives: newLives,
-            question_status: updatedStatuses
-          })
-          .eq('id', participant.id)
-          .select()
-          .single();
+        const updateRes = await ParticipantService.updateParticipant(participant.id, {
+          score: newScore,
+          lives: newLives,
+          question_status: updatedStatuses,
+        });
+
+        if (!updateRes.success) throw updateRes.error;
+        const updatedPart = updateRes.data;
 
         if (updatedPart) {
           set({
@@ -670,11 +606,8 @@ export const usePlayStore = create<PlayState>((set, get) => {
           if (status === 'SUBSCRIBED') {
             // Fresh fetch to catch any events missed during the subscribe handshake
             try {
-              const { data: freshSession } = await supabase
-                .from('quiz_sessions')
-                .select('*')
-                .eq('id', sessionId)
-                .single();
+              const freshRes = await SessionService.getSession(sessionId);
+              const freshSession = freshRes.success ? freshRes.data : null;
               if (freshSession) {
                 const currentSess = get().session;
                 if (currentSess && (
@@ -770,14 +703,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
             // Ensure questions are loaded (only fetch if missing)
             let questions = get().questions;
             if (!questions || questions.length === 0) {
-              const { data, error } = await supabase
-                .from('questions')
-                .select('*')
-                .eq('quiz_id', updatedSess.quiz_id)
-                .neq('id', cacheBuster())
-                .order('order_index', { ascending: true });
-              if (error) throw error;
-              questions = (data as Question[]) || [];
+              const qsRes = await QuestionService.getQuestions(updatedSess.quiz_id);
+              if (!qsRes.success) throw qsRes.error;
+              questions = qsRes.data || [];
               set({ questions });
             }
 
@@ -866,11 +794,8 @@ export const usePlayStore = create<PlayState>((set, get) => {
           const updatedParts = parts.map((p: any) => p.id === participant.id ? updatedPart : p);
           localStorage.setItem(partsKey, JSON.stringify(updatedParts));
         } else {
-          const { error } = await supabase
-            .from('participants')
-            .update({ current_progress: index })
-            .eq('id', participant.id);
-          if (error) throw error;
+          const res = await ParticipantService.updateParticipant(participant.id, { current_progress: index });
+          if (!res.success) throw res.error;
         }
       } catch (err) {
         console.warn('Failed to update current progress on server:', err);
@@ -909,13 +834,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
         const updatedParts = parts.map((p: any) => p.id === participant.id ? updatedPart : p);
         localStorage.setItem(partsKey, JSON.stringify(updatedParts));
       } else {
-        await supabase
-          .from('participants')
-          .update({
-            question_status: updatedStatuses,
-            skipped_questions: updatedSkipped
-          })
-          .eq('id', participant.id);
+        await ParticipantService.updateParticipant(participant.id, {
+          question_status: updatedStatuses,
+          skipped_questions: updatedSkipped,
+        });
       }
 
       // Navigate to next question automatically if available, otherwise stay
@@ -1021,8 +943,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
         localStorage.setItem(partsKey, JSON.stringify(updatedParts));
       } else {
         try {
-          await supabase.from('answers').insert({
-            id: newAnswer.id,
+          await AnswerService.submitAnswer({
             participant_id: participant.id,
             question_id: currentQuestion.id,
             selected_option_id: optionIdToSave,
@@ -1033,11 +954,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
             score_awarded: scoreAwarded,
           });
 
-          await supabase.from('participants').update({
+          await ParticipantService.updateParticipant(participant.id, {
             score: newScore,
             lives: newLives,
             question_status: updatedStatuses
-          }).eq('id', participant.id);
+          });
         } catch (e) {
           console.error('Failed to submit self-paced answer:', e);
         }
@@ -1071,10 +992,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
         localStorage.setItem(partsKey, JSON.stringify(updatedParts));
       } else {
         try {
-          await supabase
-            .from('participants')
-            .update({ is_completed: true })
-            .eq('id', participant.id);
+          await ParticipantService.updateParticipant(participant.id, { is_completed: true });
         } catch (e) {
           console.error('Failed to submit final quiz:', e);
         }
@@ -1099,13 +1017,9 @@ export const usePlayStore = create<PlayState>((set, get) => {
         return parts.sort((a: any, b: any) => b.score - a.score);
       } else {
         try {
-          const { data, error } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('session_id', session.id)
-            .order('score', { ascending: false });
-          if (error) throw error;
-          return (data as Participant[]) || [];
+          const res = await LeaderboardService.getLeaderboard(session.id);
+          if (!res.success) throw res.error;
+          return res.data || [];
         } catch (e) {
           console.error('Failed to fetch leaderboard:', e);
           return [];
@@ -1129,24 +1043,10 @@ export const usePlayStore = create<PlayState>((set, get) => {
         };
       } else {
         try {
-          // Fetch participant IDs for this session
-          const { data: parts, error: partsErr } = await supabase
-            .from('participants')
-            .select('id')
-            .eq('session_id', session.id);
-          
-          if (partsErr) throw partsErr;
-          if (!parts || parts.length === 0) return null;
-          const partIds = parts.map(p => p.id);
-          
-          const { data: answers, error: ansErr } = await supabase
-            .from('answers')
-            .select('is_correct')
-            .eq('question_id', questionId)
-            .in('participant_id', partIds);
-          
-          if (ansErr) throw ansErr;
-          if (!answers || answers.length === 0) {
+          const ansRes = await AnswerService.getAnswersForQuestion(session.id, questionId);
+          if (!ansRes.success) throw ansRes.error;
+          const answers = ansRes.data || [];
+          if (answers.length === 0) {
             return { correctCount: 0, incorrectCount: 0, totalCount: 0 };
           }
 
@@ -1182,10 +1082,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
           localStorage.setItem(partsKey, JSON.stringify(updatedParts));
         } else {
           try {
-            await supabase
-              .from('participants')
-              .update({ violation_count: newViolationCount })
-              .eq('id', participant.id);
+            await ParticipantService.updateParticipant(participant.id, { violation_count: newViolationCount });
           } catch (e) {
             console.error('Failed to update violation count:', e);
           }

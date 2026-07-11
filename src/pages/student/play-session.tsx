@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { showConfirm, showError } from '../../lib/swal';
-import { supabase } from '../../lib/supabase';
+import { QuestionService } from '../../services/question.service';
 import type { Option, Participant } from '../../types';
 import { LazyImage } from '../../components/lazy-image';
 import { getSafeMediaUrl } from '../../lib/media';
@@ -227,13 +227,10 @@ export const PlaySession: React.FC = () => {
       setLoadingAllOptions(false);
     } else {
       try {
-        const { data, error } = await supabase
-          .from('options')
-          .select('*')
-          .in('question_id', qIds);
-        if (error) throw error;
+        const res = await QuestionService.getOptionsForQuestions(qIds);
+        if (!res.success) throw res.error;
         const map: Record<string, Option[]> = {};
-        data?.forEach((opt: Option) => {
+        res.data?.forEach((opt: Option) => {
           if (!map[opt.question_id]) map[opt.question_id] = [];
           map[opt.question_id].push(opt);
         });

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { supabase } from '../lib/supabase';
+import { AuthService } from '../services/auth.service';
+import { supabase } from '../lib/supabase'; // Kept only for onAuthStateChange listener
 import type { Profile, UserRole } from '../types';
 
 interface AuthState {
@@ -25,55 +26,6 @@ const MOCK_PROFILES: Record<string, Omit<Profile, 'id' | 'created_at'>> = {
   'admin@sinesa.com': { role: 'admin', full_name: 'Administrator Sinesa', avatar_url: null },
   'guru@sinesa.com': { role: 'teacher', full_name: 'Ibu Guru Pertiwi', avatar_url: null },
   'murid@sinesa.com': { role: 'student', full_name: 'Budi Santoso', avatar_url: null },
-};
-
-// Helper to get or dynamically create profile if missing (resilient to trigger failures)
-const getOrCreateProfile = async (user: any): Promise<Profile | null> => {
-  try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
-
-    if (profile) {
-      return profile as Profile;
-    }
-
-    // If profile is missing (e.g. trigger failed during signup)
-    if (!profile) {
-      const userRole = (user.user_metadata?.role || 'student') as UserRole;
-      const fullName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User Sinesa';
-
-      const newProfile: Omit<Profile, 'created_at'> = {
-        id: user.id,
-        role: userRole,
-        full_name: fullName,
-        avatar_url: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(fullName)}`,
-      };
-
-      const { data: insertedProfile, error: insertError } = await supabase
-        .from('profiles')
-        .insert(newProfile)
-        .select('*')
-        .single();
-
-      if (insertError) {
-        console.warn('Failed to create database fallback profile, using in-memory profile:', insertError);
-        return {
-          ...newProfile,
-          created_at: new Date().toISOString(),
-        } as Profile;
-      }
-
-      return insertedProfile as Profile;
-    }
-
-    return null;
-  } catch (err) {
-    console.error('Error in getOrCreateProfile:', err);
-    return null;
-  }
 };
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -104,11 +56,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      // Supabase initialization
-      const { data: { session } } = await supabase.auth.getSession();
+      // Supabase initialization via AuthService
+      const sessionRes = await AuthService.getSession();
+      const session = sessionRes.data?.session;
       
       if (session?.user) {
-        const profile = await getOrCreateProfile(session.user);
+        const profileRes = await AuthService.getOrCreateProfile(session.user);
+        const profile = profileRes.success ? profileRes.data : null;
 
         set({
           user: session.user,
@@ -122,7 +76,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // Listen for auth changes
       supabase.auth.onAuthStateChange(async (_event, session) => {
         if (session?.user) {
-          const profile = await getOrCreateProfile(session.user);
+          const profileRes = await AuthService.getOrCreateProfile(session.user);
+          const profile = profileRes.success ? profileRes.data : null;
 
           set({
             user: session.user,
@@ -149,9 +104,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     try {
-      await supabase.auth.signOut();
+      await AuthService.signOut();
     } catch (err) {
-      console.warn('Error during Supabase signout:', err);
+      console.warn('Error during signout:', err);
     } finally {
       set({ user: null, profile: null, loading: false });
     }

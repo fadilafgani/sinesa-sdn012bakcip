@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
+import { AuthService } from '../services/auth.service';
+import { QuizService } from '../services/quiz.service';
+import { QuestionService } from '../services/question.service';
+import { SessionService } from '../services/session.service';
+import { ParticipantService } from '../services/participant.service';
+import { AnswerService } from '../services/answer.service';
 
 // ponytail: shared helpers to kill duplicate code across stage transitions
 
@@ -10,7 +16,7 @@ const cacheBuster = () =>
   '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
 
 /** Swallow auth refresh errors — we just want to keep the token alive */
-const refreshAuth = async () => { try { await supabase.auth.getSession(); } catch (_) {} };
+const refreshAuth = async () => { await AuthService.refreshSession(); };
 
 /**
  * Update quiz_sessions in DB then set local state.
@@ -31,11 +37,8 @@ async function updateSessionStage(
   }
   await refreshAuth();
   console.log('[SYNC] HostStore: Updating DB with', updates);
-  const { error } = await supabase
-    .from('quiz_sessions')
-    .update(updates)
-    .eq('id', sessionId);
-  if (error) throw error;
+  const res = await SessionService.updateSession(sessionId, updates);
+  if (!res.success) throw res.error;
   console.log('[SYNC] HostStore: DB updated. Setting local state...');
   setFn({ activeSession: fullSession, ...extraLocalState });
 }
@@ -181,26 +184,17 @@ export const useHostStore = create<HostState>((set, get) => {
 
         // Supabase Flow
         try {
-          const { data: { user } } = await supabase.auth.getUser();
+          const userRes = await AuthService.getSession();
+          const user = userRes.data?.session?.user;
           if (!user) throw new Error('Unauthorized');
 
-          const { data: quizData } = await supabase
-            .from('quizzes')
-            .select('*')
-            .eq('id', quizId)
-            .neq('id', cacheBuster())
-            .single();
+          const quizRes = await QuizService.getQuizById(quizId);
+          const quizData = quizRes.data;
 
-          if (!quizData) throw new Error('Kuis tidak ditemukan.');
+          if (!quizRes.success || !quizData) throw new Error('Kuis tidak ditemukan.');
 
-          const { data: existingSessions } = await supabase
-            .from('quiz_sessions')
-            .select('*')
-            .eq('quiz_id', quizId)
-            .eq('host_id', user.id)
-            .in('status', ['lobby', 'active'])
-            .neq('id', cacheBuster())
-            .order('created_at', { ascending: false });
+          const existingSessionsRes = await SessionService.getActiveSessionsForQuiz(quizId, user.id);
+          const existingSessions = existingSessionsRes.data;
 
           let sessionData = null;
           let isReused = false;
@@ -212,47 +206,38 @@ export const useHostStore = create<HostState>((set, get) => {
             // Clean up other duplicate sessions if any
             if (existingSessions.length > 1) {
               const staleIds = existingSessions.slice(1).map(s => s.id);
-              await supabase
-                .from('quiz_sessions')
-                .update({ status: 'completed', completed_at: new Date().toISOString() })
-                .in('id', staleIds);
+              await SessionService.terminateSessionsByIds(staleIds);
             }
           } else {
             // Clean up any other active/lobby sessions of this quiz to avoid conflicts
-            await supabase
-              .from('quiz_sessions')
-              .update({ status: 'completed', completed_at: new Date().toISOString() })
-              .eq('quiz_id', quizId)
-              .in('status', ['lobby', 'active']);
+            await SessionService.terminateSessions(quizId);
 
             // Create quiz session
-            const { data: newSession, error: sessionError } = await supabase
-              .from('quiz_sessions')
-              .insert({
-                quiz_id: quizId,
-                host_id: user.id,
-                status: 'lobby',
-                current_stage: 'waiting',
-                current_question_index: -1,
-                quiz_mode: quizData.quiz_mode || 'serius',
-                lives_count: quizData.lives_count !== undefined ? quizData.lives_count : 3,
-                show_final_result: quizData.show_final_result !== undefined ? quizData.show_final_result : true,
-                show_leaderboard: quizData.show_leaderboard !== undefined ? quizData.show_leaderboard : true,
-                show_correct_answer: quizData.show_correct_answer !== undefined ? quizData.show_correct_answer : true,
-                show_answer_review: quizData.show_answer_review !== undefined ? quizData.show_answer_review : true,
-                show_question_result: quizData.show_question_result !== undefined ? quizData.show_question_result : true,
-                show_explanation: quizData.show_explanation !== undefined ? quizData.show_explanation : true,
-                show_score_per_question: quizData.show_score_per_question !== undefined ? quizData.show_score_per_question : true,
-                show_question_statistics: quizData.show_question_statistics !== undefined ? quizData.show_question_statistics : true,
-                anti_cheat_enabled: quizData.anti_cheat_enabled !== undefined ? quizData.anti_cheat_enabled : false,
-                fullscreen_required: quizData.fullscreen_required !== undefined ? quizData.fullscreen_required : false,
-                auto_submit_on_violation: quizData.auto_submit_on_violation !== undefined ? quizData.auto_submit_on_violation : 3,
-              })
-              .select()
-              .single();
+            const newSessionRes = await SessionService.createSession({
+              quiz_id: quizId,
+              host_id: user.id,
+              status: 'lobby',
+              current_stage: 'waiting',
+              current_question_index: -1,
+              quiz_mode: quizData.quiz_mode || 'serius',
+              lives_count: quizData.lives_count !== undefined ? quizData.lives_count : 3,
+              show_final_result: quizData.show_final_result !== undefined ? quizData.show_final_result : true,
+              show_leaderboard: quizData.show_leaderboard !== undefined ? quizData.show_leaderboard : true,
+              show_correct_answer: quizData.show_correct_answer !== undefined ? quizData.show_correct_answer : true,
+              show_answer_review: quizData.show_answer_review !== undefined ? quizData.show_answer_review : true,
+              show_question_result: quizData.show_question_result !== undefined ? quizData.show_question_result : true,
+              show_explanation: quizData.show_explanation !== undefined ? quizData.show_explanation : true,
+              show_score_per_question: quizData.show_score_per_question !== undefined ? quizData.show_score_per_question : true,
+              show_question_statistics: quizData.show_question_statistics !== undefined ? quizData.show_question_statistics : true,
+              anti_cheat_enabled: quizData.anti_cheat_enabled !== undefined ? quizData.anti_cheat_enabled : false,
+              fullscreen_required: quizData.fullscreen_required !== undefined ? quizData.fullscreen_required : false,
+              auto_submit_on_violation: quizData.auto_submit_on_violation !== undefined ? quizData.auto_submit_on_violation : 3,
+              question_started_at: null,
+              question_expires_at: null,
+            });
 
-            if (sessionError) throw sessionError;
-            sessionData = newSession;
+            if (!newSessionRes.success || !newSessionRes.data) throw newSessionRes.error || new Error('Failed to create session');
+            sessionData = newSessionRes.data;
           }
 
           // Fetch questions
@@ -264,11 +249,8 @@ export const useHostStore = create<HostState>((set, get) => {
           if (sessionData.status === 'active' && sessionData.current_question_index >= 0) {
             if (loadedQuestions[sessionData.current_question_index]) {
               activeQuestion = loadedQuestions[sessionData.current_question_index];
-              const { data: optionsData } = await supabase
-                .from('options')
-                .select('*')
-                .eq('question_id', activeQuestion.id);
-              activeOptions = (optionsData as Option[]) || [];
+              const optionsRes = await QuestionService.getQuestionOptions(activeQuestion.id);
+              activeOptions = optionsRes.success && optionsRes.data ? optionsRes.data : [];
             }
           }
 
@@ -288,18 +270,14 @@ export const useHostStore = create<HostState>((set, get) => {
 
           // Fetch existing participants and answers if we are reusing a session
           if (isReused) {
-            const { data: existingParts } = await supabase
-              .from('participants')
-              .select('*')
-              .eq('session_id', sessionData.id);
+            const existingPartsRes = await ParticipantService.getParticipants(sessionData.id);
+            const existingParts = existingPartsRes.data;
             if (existingParts) {
               set({ participants: existingParts as Participant[] });
             }
 
-            const { data: existingAnswers } = await supabase
-              .from('answers')
-              .select('*, participants!inner(session_id)')
-              .eq('participants.session_id', sessionData.id);
+            const existingAnswersRes = await AnswerService.getAnswersForSession(sessionData.id);
+            const existingAnswers = existingAnswersRes.data;
             if (existingAnswers) {
               const mappedAnswers: Answer[] = existingAnswers.map((d: any) => {
                 const { participants, ...answer } = d;
@@ -392,12 +370,8 @@ export const useHostStore = create<HostState>((set, get) => {
         const mockOpts = localStorage.getItem(`options_${nextQuestion.id}`);
         options = mockOpts ? JSON.parse(mockOpts) : [];
       } else {
-        const { data } = await supabase
-          .from('options')
-          .select('*')
-          .eq('question_id', nextQuestion.id)
-          .neq('id', cacheBuster());
-        options = (data as Option[]) || [];
+        const res = await QuestionService.getQuestionOptions(nextQuestion.id);
+        options = res.success && res.data ? res.data : [];
       }
 
       const updatedSession: QuizSession = {
@@ -604,16 +578,10 @@ export const useHostStore = create<HostState>((set, get) => {
       await refreshAuth();
 
       try {
-        const cacheBusterQs = cacheBuster();
-        const { data, error } = await supabase
-          .from('questions')
-          .select('*')
-          .eq('quiz_id', quizId)
-          .neq('id', cacheBusterQs)
-          .order('order_index', { ascending: true });
-        if (!error && data) {
-          set({ questions: data as Question[] });
-          return data as Question[];
+        const res = await QuestionService.getQuestions(quizId);
+        if (res.success && res.data) {
+          set({ questions: res.data });
+          return res.data;
         }
       } catch (err) {
         console.error('Error in fetchQuestions action:', err);
@@ -629,15 +597,10 @@ export const useHostStore = create<HostState>((set, get) => {
       await refreshAuth();
 
       try {
-        const cb = cacheBuster();
-        const { data, error } = await supabase
-          .from('participants')
-          .select('*')
-          .eq('session_id', sessionId)
-          .neq('id', cb);
+        const res = await ParticipantService.getParticipants(sessionId);
+        const data = res.data;
 
-        if (error) throw error;
-        if (data) {
+        if (res.success && data) {
           // Only update if the length changed or data is different, to avoid unnecessary re-renders
           set(state => {
             const currentSig = state.participants.map((p: Participant) => `${p.id}:${p.score}:${p.display_name}`).sort().join(',');
@@ -662,16 +625,10 @@ export const useHostStore = create<HostState>((set, get) => {
       await refreshAuth();
 
       try {
-        const cb = cacheBuster();
-        const { data, error } = await supabase
-          .from('answers')
-          .select('*, participants!inner(session_id)')
-          .eq('participants.session_id', sessionId)
-          .eq('question_id', currentQuestion.id)
-          .neq('id', cb);
+        const res = await AnswerService.getAnswersForQuestion(sessionId, currentQuestion.id);
+        const data = res.data;
 
-        if (error) throw error;
-        if (data) {
+        if (res.success && data) {
           const mappedAnswers: Answer[] = data.map((d: any) => {
             const { participants, ...answer } = d;
             return answer as Answer;
@@ -743,11 +700,8 @@ export const useHostStore = create<HostState>((set, get) => {
           });
 
           // Fetch the participant's details to update their score on the UI
-          const { data: partData } = await supabase
-            .from('participants')
-            .select('*')
-            .eq('id', newAns.participant_id)
-            .single();
+          const partRes = await ParticipantService.getParticipantById(newAns.participant_id);
+          const partData = partRes.success ? partRes.data : null;
 
           if (partData) {
             set(state => ({
@@ -791,12 +745,8 @@ export const useHostStore = create<HostState>((set, get) => {
             const indexChanged = !currentQuestion || get().activeSession?.current_question_index !== updatedSess.current_question_index;
             if (indexChanged && questions[updatedSess.current_question_index]) {
               activeQuestion = questions[updatedSess.current_question_index];
-              const { data } = await supabase
-                .from('options')
-                .select('*')
-                .eq('question_id', activeQuestion.id)
-                .neq('id', cacheBuster());
-              activeOptions = (data as Option[]) || [];
+              const optsRes = await QuestionService.getQuestionOptions(activeQuestion.id);
+              activeOptions = optsRes.success && optsRes.data ? optsRes.data : [];
             }
           }
 
