@@ -5,6 +5,26 @@ import { checkIsMock } from './auth-store';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 
+// ponytail: shared helpers to kill duplicate code
+const cacheBuster = () =>
+  '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+const refreshAuth = async () => { try { await supabase.auth.getSession(); } catch (_) {} };
+
+/** Fetch options for a question. Used by joinSession, handleQuestionChange, setQuestionProgress. */
+async function fetchOptionsById(questionId: string): Promise<Option[]> {
+  if (checkIsMock()) {
+    const raw = localStorage.getItem(`options_${questionId}`);
+    return raw ? JSON.parse(raw) : [];
+  }
+  const { data, error } = await supabase
+    .from('options')
+    .select('*')
+    .eq('question_id', questionId)
+    .neq('id', cacheBuster());
+  if (error) throw error;
+  return (data as Option[]) || [];
+}
+
 interface PlayState {
   session: QuizSession | null;
   quiz: Quiz | null;
@@ -206,13 +226,13 @@ export const usePlayStore = create<PlayState>((set, get) => {
             console.warn('Failed to calculate server clock offset:', e);
           }
 
-          const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+          const cacheBusterSess = cacheBuster();
           // 1. Get quiz by pin
           let { data: quizData, error: quizErr } = await supabase
             .from('quizzes')
             .select('*')
             .eq('pin_code', pinCode)
-            .neq('id', cacheBuster)
+            .neq('id', cacheBusterSess)
             .single();
 
           if (quizErr || !quizData) {
@@ -222,7 +242,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
               .from('quizzes')
               .select('*')
               .eq('pin_code', pinCode)
-              .neq('id', cacheBuster)
+              .neq('id', cacheBusterSess)
               .single();
             quizData = retryRes.data;
             quizErr = retryRes.error;
@@ -239,7 +259,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
             .select('*')
             .eq('quiz_id', quizData.id)
             .in('status', ['lobby', 'active'])
-            .neq('id', cacheBuster)
+            .neq('id', cacheBusterSess)
             .order('created_at', { ascending: false })
             .limit(1)
             .single();
@@ -252,7 +272,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
               .select('*')
               .eq('quiz_id', quizData.id)
               .in('status', ['lobby', 'active'])
-              .neq('id', cacheBuster)
+              .neq('id', cacheBusterSess)
               .order('created_at', { ascending: false })
               .limit(1)
               .single();
@@ -350,12 +370,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
           }
 
           // Fetch all questions of the quiz
-          const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: questions } = await supabase
             .from('questions')
             .select('*')
             .eq('quiz_id', sessionData.quiz_id)
-            .neq('id', cacheBusterQs)
+            .neq('id', cacheBuster())
             .order('order_index', { ascending: true });
 
           const loadedQs = (questions as Question[]) || [];
@@ -393,17 +412,12 @@ export const usePlayStore = create<PlayState>((set, get) => {
             const activeIdx = sessionData.current_question_index >= 0 ? sessionData.current_question_index : 0;
             const activeQ = loadedQs[activeIdx];
             if (activeQ) {
-              const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-              const { data: options } = await supabase
-                .from('options')
-                .select('*')
-                .eq('question_id', activeQ.id)
-                .neq('id', cacheBusterOpts);
+              const options = await fetchOptionsById(activeQ.id);
 
               const hasAns = !!map[activeQ.id];
               set({
                 currentQuestion: activeQ,
-                currentOptions: (options as Option[]) || [],
+                currentOptions: options,
                 hasAnswered: hasAns,
                 isAnswerCorrect: hasAns ? map[activeQ.id].is_correct : null,
                 scoreAwarded: hasAns ? map[activeQ.id].score_awarded : 0,
@@ -433,7 +447,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     submitAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session } = get();
       if (!session) return;
@@ -733,9 +747,11 @@ export const usePlayStore = create<PlayState>((set, get) => {
         newQIdx: updatedSess.current_question_index,
         status: updatedSess.status,
       });
-      set({ session: updatedSess });
-      console.log('[SYNC] PlayStore: Zustand session state updated');
 
+      // ponytail: always update session first — single source of truth
+      set({ session: updatedSess });
+
+      // Handle finish
       if (updatedSess.status === 'completed' || updatedSess.current_stage === 'finished') {
         get().stopListening();
         set({ isCompleted: true });
@@ -743,61 +759,53 @@ export const usePlayStore = create<PlayState>((set, get) => {
         return;
       }
 
-      // If current_question_index is valid, ensure the question and options are loaded
+      // Handle question index change
       if (updatedSess.current_question_index >= 0) {
-        const questionIdxChanged = !previousSess || previousSess.current_question_index !== updatedSess.current_question_index || get().currentQuestion === null;
+        const questionIdxChanged = !previousSess ||
+          previousSess.current_question_index !== updatedSess.current_question_index ||
+          get().currentQuestion === null;
 
         if (questionIdxChanged) {
           try {
+            // Ensure questions are loaded (only fetch if missing)
             let questions = get().questions;
             if (!questions || questions.length === 0) {
-              const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-              const { data: questionsData, error: qsErr } = await supabase
+              const { data, error } = await supabase
                 .from('questions')
                 .select('*')
                 .eq('quiz_id', updatedSess.quiz_id)
-                .neq('id', cacheBusterQs)
+                .neq('id', cacheBuster())
                 .order('order_index', { ascending: true });
-              if (qsErr) throw qsErr;
-              questions = (questionsData as Question[]) || [];
+              if (error) throw error;
+              questions = (data as Question[]) || [];
               set({ questions });
             }
 
-            if (questions && questions[updatedSess.current_question_index]) {
-              const nextQuestion = questions[updatedSess.current_question_index] as Question;
-
-              const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-              const { data: options, error: optsErr } = await supabase
-                .from('options')
-                .select('*')
-                .eq('question_id', nextQuestion.id)
-                .neq('id', cacheBusterOpts);
-              if (optsErr) throw optsErr;
-
-              // Check if already answered (important for rejoin/recovery)
-              const existingAnswer = get().answersMap[nextQuestion.id];
+            const nextQ = questions[updatedSess.current_question_index];
+            if (nextQ) {
+              const options = await fetchOptionsById(nextQ.id);
+              const existingAnswer = get().answersMap[nextQ.id];
               const hasAns = !!existingAnswer;
 
               set({
                 currentQuestionIndex: updatedSess.current_question_index,
-                currentQuestion: nextQuestion,
-                currentOptions: (options as Option[]) || [],
+                currentQuestion: nextQ,
+                currentOptions: options,
                 hasAnswered: hasAns,
                 isAnswerCorrect: hasAns ? existingAnswer.is_correct : null,
                 scoreAwarded: hasAns ? existingAnswer.score_awarded : 0,
               });
             }
           } catch (err) {
-            console.error('Error handling session update gameplay progress:', err);
+            console.error('[SYNC] PlayStore: Error loading question on stage change:', err);
           }
         }
       }
 
-      // Handle specific stage transitions
+      // Handle force auto-submit on question_result
       if (updatedSess.current_stage === 'question_result') {
-        // If student hasn't answered yet, force submission
         if (!get().hasAnswered && get().currentQuestion) {
-          console.log('handleSessionUpdate: student has not answered, forcing auto-submit');
+          console.log('[SYNC] PlayStore: Auto-submitting unanswered question');
           const qType = get().currentQuestion?.question_type || 'multiple_choice';
           if (qType === 'multiple_answer') {
             await get().submitAnswer({ optionIds: [] });
@@ -816,7 +824,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     setQuestionProgress: async (index: number) => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { questions, participant, answersMap, session } = get();
       if (!session || !participant || index < 0 || index >= questions.length) return;
@@ -827,19 +835,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
       // Fetch options for the active question
       let options: Option[] = [];
       try {
-        if (isMock) {
-          const mockOpts = localStorage.getItem(`options_${activeQ.id}`);
-          options = mockOpts ? JSON.parse(mockOpts) : [];
-        } else {
-          const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
-          const { data, error } = await supabase
-            .from('options')
-            .select('*')
-            .eq('question_id', activeQ.id)
-            .neq('id', cacheBusterOpts);
-          if (error) throw error;
-          options = (data as Option[]) || [];
-        }
+        options = await fetchOptionsById(activeQ.id);
       } catch (err) {
         console.error('setQuestionProgress failed to fetch options:', err);
         throw new Error('Gagal memuat pilihan jawaban dari server. Harap periksa jaringan Anda.');
@@ -884,7 +880,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     skipQuestion: async (questionId: string) => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session, participant, questionStatus, skippedQuestions, currentQuestionIndex, questions } = get();
       if (!session || !participant) return;
@@ -930,7 +926,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     submitSelfPacedAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session, participant, currentQuestion, currentOptions, hasAnswered, questionStatus, answersMap, questionStartedAt } = get();
       if (!session || !participant || !currentQuestion || hasAnswered) return;
@@ -1055,7 +1051,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     submitFinalQuiz: async () => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session, participant } = get();
       if (!session || !participant) return;
@@ -1092,7 +1088,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     fetchLeaderboard: async () => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session } = get();
       if (!session) return [];
@@ -1119,7 +1115,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     fetchQuestionStats: async (questionId: string) => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const { session } = get();
       if (!session) return null;
@@ -1168,7 +1164,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
 
     incrementViolation: async () => {
         // Auto-refresh token if expired
-        try { await supabase.auth.getSession(); } catch (e) {}
+        await refreshAuth();
 
         const { session, participant } = get();
         if (!session || !participant) return;

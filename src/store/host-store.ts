@@ -3,6 +3,43 @@ import { supabase } from '../lib/supabase';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '../types';
 import { checkIsMock } from './auth-store';
 
+// ponytail: shared helpers to kill duplicate code across stage transitions
+
+/** Generate a fake UUID to bypass Supabase query cache */
+const cacheBuster = () =>
+  '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+
+/** Swallow auth refresh errors — we just want to keep the token alive */
+const refreshAuth = async () => { try { await supabase.auth.getSession(); } catch (_) {} };
+
+/**
+ * Update quiz_sessions in DB then set local state.
+ * ponytail: one function replaces 5 near-identical DB→set patterns.
+ */
+async function updateSessionStage(
+  sessionId: string,
+  updates: Partial<QuizSession>,
+  fullSession: QuizSession,
+  setFn: (s: Partial<any>) => void,
+  extraLocalState?: Partial<any>,
+): Promise<void> {
+  const isMock = checkIsMock();
+  if (isMock) {
+    localStorage.setItem(`session_${sessionId}`, JSON.stringify(fullSession));
+    setFn({ activeSession: fullSession, ...extraLocalState });
+    return;
+  }
+  await refreshAuth();
+  console.log('[SYNC] HostStore: Updating DB with', updates);
+  const { error } = await supabase
+    .from('quiz_sessions')
+    .update(updates)
+    .eq('id', sessionId);
+  if (error) throw error;
+  console.log('[SYNC] HostStore: DB updated. Setting local state...');
+  setFn({ activeSession: fullSession, ...extraLocalState });
+}
+
 interface HostState {
   questions: Question[];
   activeSession: QuizSession | null;
@@ -147,26 +184,22 @@ export const useHostStore = create<HostState>((set, get) => {
           const { data: { user } } = await supabase.auth.getUser();
           if (!user) throw new Error('Unauthorized');
 
-          // Get full quiz details including pin_code, duration_per_question and quiz_mode
-          const cacheBusterQuiz = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: quizData } = await supabase
             .from('quizzes')
             .select('*')
             .eq('id', quizId)
-            .neq('id', cacheBusterQuiz)
+            .neq('id', cacheBuster())
             .single();
 
           if (!quizData) throw new Error('Kuis tidak ditemukan.');
 
-          // Check for existing lobby or active session for this quiz (created by this host)
-          const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: existingSessions } = await supabase
             .from('quiz_sessions')
             .select('*')
             .eq('quiz_id', quizId)
             .eq('host_id', user.id)
             .in('status', ['lobby', 'active'])
-            .neq('id', cacheBuster)
+            .neq('id', cacheBuster())
             .order('created_at', { ascending: false });
 
           let sessionData = null;
@@ -295,41 +328,24 @@ export const useHostStore = create<HostState>((set, get) => {
       const session = get().activeSession;
       if (!session) return;
 
-      const isMock = checkIsMock();
+      const updated: QuizSession = {
+        ...session,
+        status: 'active',
+        current_stage: 'countdown',
+        current_question_index: 0,
+      };
 
-      if (isMock) {
-        const updatedSession = { ...session, status: 'active' as const, current_stage: 'countdown' as const, current_question_index: 0 };
-        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
-        set({ activeSession: updatedSession });
-        return;
-      }
-
-      // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
-
-      console.log('[SYNC] HostStore.startQuiz: Updating DB...');
-      const { error } = await supabase
-        .from('quiz_sessions')
-        .update({ status: 'active', current_stage: 'countdown', current_question_index: 0 })
-        .eq('id', session.id);
-
-      if (error) throw error;
-      console.log('[SYNC] HostStore.startQuiz: DB updated. Setting local state...');
-      
-      set({
-        activeSession: {
-          ...session,
-          status: 'active',
-          current_stage: 'countdown',
-          current_question_index: 0,
-        }
-      });
-      console.log('[SYNC] HostStore.startQuiz: Local state set to countdown');
+      await updateSessionStage(
+        session.id,
+        { status: 'active', current_stage: 'countdown', current_question_index: 0 },
+        updated,
+        set,
+      );
     },
 
     nextQuestion: async () => {
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const session = get().activeSession;
       if (!session) {
@@ -342,12 +358,11 @@ export const useHostStore = create<HostState>((set, get) => {
       if (!isMock && (!questions || questions.length === 0)) {
         console.log('nextQuestion: Questions array empty in store. Fetching fallback from database...');
         try {
-          const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
           const { data: questionsData } = await supabase
             .from('questions')
             .select('*')
             .eq('quiz_id', session.quiz_id)
-            .neq('id', cacheBusterQs)
+            .neq('id', cacheBuster())
             .order('order_index', { ascending: true });
 
           if (questionsData && questionsData.length > 0) {
@@ -372,18 +387,16 @@ export const useHostStore = create<HostState>((set, get) => {
 
       const nextQuestion = questions[nextIndex];
 
-      // Fetch options for next question
       let options: Option[] = [];
       if (isMock) {
         const mockOpts = localStorage.getItem(`options_${nextQuestion.id}`);
         options = mockOpts ? JSON.parse(mockOpts) : [];
       } else {
-        const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
         const { data } = await supabase
           .from('options')
           .select('*')
           .eq('question_id', nextQuestion.id)
-          .neq('id', cacheBusterOpts);
+          .neq('id', cacheBuster());
         options = (data as Option[]) || [];
       }
 
@@ -399,24 +412,12 @@ export const useHostStore = create<HostState>((set, get) => {
         submissions: [],
       });
 
-      if (isMock) {
-        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
-        set({ activeSession: updatedSession });
-      } else {
-        // Update database first, then set local state
-        console.log('[SYNC] HostStore.nextQuestion: Updating DB to index', nextIndex);
-        const { error } = await supabase
-          .from('quiz_sessions')
-          .update({
-            current_question_index: nextIndex,
-            current_stage: 'countdown',
-          })
-          .eq('id', session.id);
-
-        if (error) throw error;
-        console.log('[SYNC] HostStore.nextQuestion: DB updated. Setting local state...');
-        set({ activeSession: updatedSession });
-      }
+      await updateSessionStage(
+        session.id,
+        { current_question_index: nextIndex, current_stage: 'countdown' },
+        updatedSession,
+        set,
+      );
     },
 
     publishQuestionStage: async () => {
@@ -426,7 +427,7 @@ export const useHostStore = create<HostState>((set, get) => {
       if (!session || !currentQuestion) return;
 
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       const isMock = checkIsMock();
       const now = new Date();
@@ -507,119 +508,74 @@ export const useHostStore = create<HostState>((set, get) => {
 
         set({ virtualStudentIntervals: intervals });
       } else {
-        console.log('[SYNC] HostStore.publishQuestionStage: Updating DB...');
-        const { error } = await supabase
-          .from('quiz_sessions')
-          .update({
+        await updateSessionStage(
+          session.id,
+          {
             current_stage: 'question',
             question_started_at: now.toISOString(),
             question_expires_at: expiresAt.toISOString(),
-          })
-          .eq('id', session.id);
-
-        if (error) throw error;
-        console.log('[SYNC] HostStore.publishQuestionStage: DB updated. Setting local state...');
-        set({ activeSession: updatedSession });
+          },
+          updatedSession,
+          set,
+        );
       }
     },
 
     showLeaderboard: async () => {
-      // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
-
       const session = get().activeSession;
       if (!session) return;
 
-      const isMock = checkIsMock();
-      const updatedSession: QuizSession = {
-        ...session,
-        current_stage: 'leaderboard',
-      };
-
-      if (isMock) {
-        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
-        set({ activeSession: updatedSession });
-      } else {
-        console.log('[SYNC] HostStore.showLeaderboard: Updating DB...');
-        const { error } = await supabase
-          .from('quiz_sessions')
-          .update({ current_stage: 'leaderboard' })
-          .eq('id', session.id);
-
-        if (error) throw error;
-        console.log('[SYNC] HostStore.showLeaderboard: DB updated. Setting local state...');
-        set({ activeSession: updatedSession });
-      }
+      const updated: QuizSession = { ...session, current_stage: 'leaderboard' };
+      await updateSessionStage(
+        session.id,
+        { current_stage: 'leaderboard' },
+        updated,
+        set,
+      );
     },
 
     endQuiz: async () => {
-      // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
-
       const session = get().activeSession;
       if (!session) return;
 
-      const isMock = checkIsMock();
-      const updatedSession: QuizSession = {
+      const now = new Date().toISOString();
+      const updated: QuizSession = {
         ...session,
         status: 'completed',
         current_stage: 'finished',
-        completed_at: new Date().toISOString(),
+        completed_at: now,
       };
 
-      if (isMock) {
-        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
-        set({ activeSession: updatedSession, currentQuestion: null });
-      } else {
-        console.log('[SYNC] HostStore.endQuiz: Updating DB...');
-        await supabase
-          .from('quiz_sessions')
-          .update({
-            status: 'completed',
-            current_stage: 'finished',
-            completed_at: new Date().toISOString(),
-          })
-          .eq('id', session.id);
-        
-        console.log('[SYNC] HostStore.endQuiz: DB updated. Setting local state...');
-        set({ activeSession: updatedSession, currentQuestion: null });
+      await updateSessionStage(
+        session.id,
+        { status: 'completed', current_stage: 'finished', completed_at: now },
+        updated,
+        set,
+        { currentQuestion: null },
+      );
+
+      if (!checkIsMock()) {
         get().unsubscribeAll();
       }
     },
 
     revealAnswer: async () => {
-      // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
-
       const session = get().activeSession;
       if (!session) return;
 
-      const isMock = checkIsMock();
-      const now = new Date();
-
-      const updatedSession: QuizSession = {
+      const now = new Date().toISOString();
+      const updated: QuizSession = {
         ...session,
         current_stage: 'question_result',
-        question_expires_at: now.toISOString(),
+        question_expires_at: now,
       };
 
-      if (isMock) {
-        localStorage.setItem(`session_${session.id}`, JSON.stringify(updatedSession));
-        set({ activeSession: updatedSession });
-      } else {
-        console.log('[SYNC] HostStore.revealAnswer: Updating DB...');
-        const { error } = await supabase
-          .from('quiz_sessions')
-          .update({
-            current_stage: 'question_result',
-            question_expires_at: now.toISOString(),
-          })
-          .eq('id', session.id);
-
-        if (error) throw error;
-        console.log('[SYNC] HostStore.revealAnswer: DB updated. Setting local state...');
-        set({ activeSession: updatedSession });
-      }
+      await updateSessionStage(
+        session.id,
+        { current_stage: 'question_result', question_expires_at: now },
+        updated,
+        set,
+      );
     },
 
     clearSession: () => {
@@ -645,10 +601,10 @@ export const useHostStore = create<HostState>((set, get) => {
         return rawQs;
       }
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       try {
-        const cacheBusterQs = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+        const cacheBusterQs = cacheBuster();
         const { data, error } = await supabase
           .from('questions')
           .select('*')
@@ -670,15 +626,15 @@ export const useHostStore = create<HostState>((set, get) => {
       if (isMock) return;
 
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       try {
-        const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+        const cb = cacheBuster();
         const { data, error } = await supabase
           .from('participants')
           .select('*')
           .eq('session_id', sessionId)
-          .neq('id', cacheBuster);
+          .neq('id', cb);
 
         if (error) throw error;
         if (data) {
@@ -703,16 +659,16 @@ export const useHostStore = create<HostState>((set, get) => {
       if (!currentQuestion) return;
 
       // Auto-refresh token if expired
-      try { await supabase.auth.getSession(); } catch (e) {}
+      await refreshAuth();
 
       try {
-        const cacheBuster = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
+        const cb = cacheBuster();
         const { data, error } = await supabase
           .from('answers')
           .select('*, participants!inner(session_id)')
           .eq('participants.session_id', sessionId)
           .eq('question_id', currentQuestion.id)
-          .neq('id', cacheBuster);
+          .neq('id', cb);
 
         if (error) throw error;
         if (data) {
@@ -835,12 +791,11 @@ export const useHostStore = create<HostState>((set, get) => {
             const indexChanged = !currentQuestion || get().activeSession?.current_question_index !== updatedSess.current_question_index;
             if (indexChanged && questions[updatedSess.current_question_index]) {
               activeQuestion = questions[updatedSess.current_question_index];
-              const cacheBusterOpts = '00000000-0000-4000-8000-' + Math.floor(100000000000 + Math.random() * 900000000000).toString().padStart(12, '0');
               const { data } = await supabase
                 .from('options')
                 .select('*')
                 .eq('question_id', activeQuestion.id)
-                .neq('id', cacheBusterOpts);
+                .neq('id', cacheBuster());
               activeOptions = (data as Option[]) || [];
             }
           }
