@@ -205,10 +205,10 @@ export const PlaySession: React.FC = () => {
     if (currentQuestion && hasAnswered && quiz?.show_question_statistics) {
       setLoadingStats(true);
       usePlayStore.getState().fetchQuestionStats(currentQuestion.id)
-        .then(stats => {
+        .then((stats: any) => {
           setQuestionStats(stats);
         })
-        .catch(err => {
+        .catch((err: any) => {
           console.error('Error fetching question stats:', err);
         })
         .finally(() => {
@@ -224,10 +224,10 @@ export const PlaySession: React.FC = () => {
     if ((isCompleted || session?.status === 'completed' || session?.current_stage === 'finished') && quiz?.show_leaderboard && quiz?.show_final_result) {
       setLoadingLeaderboard(true);
       usePlayStore.getState().fetchLeaderboard()
-        .then(res => {
+        .then((res: any) => {
           setLeaderboard(res);
         })
-        .catch(err => {
+        .catch((err: any) => {
           console.error('Error fetching leaderboard:', err);
         })
         .finally(() => {
