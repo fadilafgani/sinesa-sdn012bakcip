@@ -1,12 +1,12 @@
 import { supabase } from '@/core/supabase';
-import { safeCall } from '@/shared/services/base.service';
+import { safeCall, cachedSafeCall, clearQueryCache } from '@/shared/services/base.service';
 import type { ServiceResponse } from '@/shared/services/base.service';
 import type { Question, Option } from '@/types';
 
 export const QuestionService = {
   async getQuestions(quizId: string): Promise<ServiceResponse<Question[]>> {
     console.log('[SYNC] QuestionService.getQuestions', { quizId });
-    return safeCall(
+    return cachedSafeCall(`questions_${quizId}`, 15000, () =>
       supabase
         .from('questions')
         .select('*')
@@ -17,18 +17,22 @@ export const QuestionService = {
 
   async createQuestion(question: any): Promise<ServiceResponse<Question>> {
     console.log('[SYNC] QuestionService.createQuestion', question);
-    return safeCall(
+    const res = await safeCall<Question>(
       supabase
         .from('questions')
         .insert(question)
         .select()
         .single()
     );
+    if (res.success) {
+      clearQueryCache('questions');
+    }
+    return res;
   },
 
   async updateQuestion(id: string, updates: Partial<Question>): Promise<ServiceResponse<Question>> {
     console.log('[SYNC] QuestionService.updateQuestion', { id, updates });
-    return safeCall(
+    const res = await safeCall<Question>(
       supabase
         .from('questions')
         .update(updates)
@@ -36,31 +40,43 @@ export const QuestionService = {
         .select()
         .single()
     );
+    if (res.success) {
+      clearQueryCache('questions');
+    }
+    return res;
   },
 
   async deleteQuestion(id: string): Promise<ServiceResponse<void>> {
     console.log('[SYNC] QuestionService.deleteQuestion', { id });
-    return safeCall(
+    const res = await safeCall<void>(
       supabase
         .from('questions')
         .delete()
         .eq('id', id)
     );
+    if (res.success) {
+      clearQueryCache('questions');
+    }
+    return res;
   },
 
   async deleteQuestionsByQuizId(quizId: string): Promise<ServiceResponse<void>> {
     console.log('[SYNC] QuestionService.deleteQuestionsByQuizId', { quizId });
-    return safeCall(
+    const res = await safeCall<void>(
       supabase
         .from('questions')
         .delete()
         .eq('quiz_id', quizId)
     );
+    if (res.success) {
+      clearQueryCache('questions');
+    }
+    return res;
   },
 
   async getQuestionOptions(questionId: string): Promise<ServiceResponse<Option[]>> {
     console.log('[SYNC] QuestionService.getQuestionOptions', { questionId });
-    return safeCall(
+    return cachedSafeCall(`options_${questionId}`, 15000, () =>
       supabase
         .from('options')
         .select('*')
@@ -70,7 +86,8 @@ export const QuestionService = {
 
   async getOptionsForQuestions(questionIds: string[]): Promise<ServiceResponse<Option[]>> {
     console.log('[SYNC] QuestionService.getOptionsForQuestions', { count: questionIds.length });
-    return safeCall(
+    const cacheKey = `options_qids_${questionIds.slice().sort().join('_')}`;
+    return cachedSafeCall(cacheKey, 15000, () =>
       supabase
         .from('options')
         .select('*')
@@ -80,21 +97,29 @@ export const QuestionService = {
 
   async createOptions(options: any[]): Promise<ServiceResponse<Option[]>> {
     console.log('[SYNC] QuestionService.createOptions', { count: options.length });
-    return safeCall(
+    const res = await safeCall<Option[]>(
       supabase
         .from('options')
         .insert(options)
         .select()
     );
+    if (res.success) {
+      clearQueryCache('options');
+    }
+    return res;
   },
 
   async deleteOptionsByQuestionId(questionId: string): Promise<ServiceResponse<void>> {
     console.log('[SYNC] QuestionService.deleteOptionsByQuestionId', { questionId });
-    return safeCall(
+    const res = await safeCall<void>(
       supabase
         .from('options')
         .delete()
         .eq('question_id', questionId)
     );
+    if (res.success) {
+      clearQueryCache('options');
+    }
+    return res;
   }
 };

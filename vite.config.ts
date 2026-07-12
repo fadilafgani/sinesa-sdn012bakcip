@@ -14,4 +14,29 @@ export default defineConfig({
       '@': resolve(__dirname, './src'),
     },
   },
+  build: {
+    sourcemap: false,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('lucide-react')) {
+              return 'lucide';
+            }
+            if (id.includes('canvas-confetti')) {
+              return 'confetti';
+            }
+            if (id.includes('recharts') || id.includes('d3')) {
+              return 'recharts';
+            }
+            if (id.includes('jspdf')) {
+              return 'jspdf';
+            }
+            return 'vendor';
+          }
+        }
+      }
+    }
+  }
 })

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useShallow } from 'zustand/shallow';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { usePlayStore } from '@/features/session/stores/play-store';
 import { AuthService } from '@/features/auth/services/auth.service';
@@ -29,8 +30,8 @@ import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { LazyImage } from '@/shared/components/lazy-image';
 
 export const StudentDashboard: React.FC = () => {
-  const { profile, signOut, isMock } = useAuthStore();
-  const { joinSession, error: joinError, loading: joining } = usePlayStore();
+  const { profile, signOut, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, signOut: state.signOut, isMock: state.isMock })));
+  const { joinSession, error: joinError, loading: joining } = usePlayStore(useShallow(state => ({ joinSession: state.joinSession, error: state.error, loading: state.loading })));
   const navigate = useNavigate();
   const location = useLocation();
 

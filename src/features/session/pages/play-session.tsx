@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useShallow } from 'zustand/shallow';
 import { usePlayStore } from '@/features/session/stores/play-store';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,7 +19,7 @@ import { getSafeMediaUrl } from '@/shared/utils/media';
 export const PlaySession: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { profile, isMock } = useAuthStore();
+  const { profile, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, isMock: state.isMock })));
   const pin = searchParams.get('pin');
   const name = searchParams.get('name');
 
@@ -36,7 +37,6 @@ export const PlaySession: React.FC = () => {
     leaveSession,
     joinSession,
     error: playError,
-    // New self-paced properties/methods
     questions,
     currentQuestionIndex,
     lives,
@@ -47,7 +47,31 @@ export const PlaySession: React.FC = () => {
     skipQuestion,
     submitSelfPacedAnswer,
     submitFinalQuiz
-  } = usePlayStore();
+  } = usePlayStore(useShallow(state => ({
+    session: state.session,
+    quiz: state.quiz,
+    participant: state.participant,
+    currentQuestion: state.currentQuestion,
+    currentOptions: state.currentOptions,
+    hasAnswered: state.hasAnswered,
+    isAnswerCorrect: state.isAnswerCorrect,
+    scoreAwarded: state.scoreAwarded,
+    loading: state.loading,
+    submitAnswer: state.submitAnswer,
+    leaveSession: state.leaveSession,
+    joinSession: state.joinSession,
+    error: state.error,
+    questions: state.questions,
+    currentQuestionIndex: state.currentQuestionIndex,
+    lives: state.lives,
+    questionStatus: state.questionStatus,
+    answersMap: state.answersMap,
+    isCompleted: state.isCompleted,
+    setQuestionProgress: state.setQuestionProgress,
+    skipQuestion: state.skipQuestion,
+    submitSelfPacedAnswer: state.submitSelfPacedAnswer,
+    submitFinalQuiz: state.submitFinalQuiz
+  })));
 
   const [localTimer, setLocalTimer] = useState(0);
   const showFeedback = session?.current_stage === 'question_result';

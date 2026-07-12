@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { AuthService } from '../services/auth.service';
 import { supabase } from '@/core/supabase';
 import type { Profile, UserRole } from '@/types';
+import { AnalyticsService } from '@/shared/services/analytics.service';
 
 interface AuthState {
   user: any | null;
@@ -74,7 +75,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
 
       // Listen for auth changes
-      supabase.auth.onAuthStateChange(async (_event, session) => {
+      supabase.auth.onAuthStateChange(async (event, session) => {
         if (session?.user) {
           const profileRes = await AuthService.getOrCreateProfile(session.user);
           const profile = profileRes.success ? profileRes.data : null;
@@ -83,8 +84,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             user: session.user,
             profile,
           });
+          if (event === 'SIGNED_IN') {
+            AnalyticsService.trackEvent('login', { email: session.user.email, role: profile?.role });
+          }
         } else {
           set({ user: null, profile: null });
+          if (event === 'SIGNED_OUT') {
+            AnalyticsService.trackEvent('logout');
+          }
         }
       });
 
@@ -96,6 +103,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signOut: async () => {
     set({ loading: true });
+    AnalyticsService.trackEvent('logout');
     if (get().isMock) {
       localStorage.removeItem('sinesa_mock_user');
       localStorage.removeItem('sinesa_mock_profile');
@@ -133,5 +141,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isMock: true,
       loading: false,
     });
+    AnalyticsService.trackEvent('login', { email, role, isMock: true });
   },
 }));

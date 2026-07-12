@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '@/types';
 import { checkIsMock } from '@/features/auth/stores/auth-store';
+import { AnalyticsService } from '@/shared/services/analytics.service';
 import { AuthService } from '@/features/auth/services/auth.service';
 import { QuizService } from '@/features/quiz/services/quiz.service';
 import { QuestionService } from '@/features/question/services/question.service';
@@ -199,7 +200,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
               });
             }
           }
-
+          AnalyticsService.trackEvent('join_quiz', { pinCode, displayName, isMock: true });
           return true;
         }
 
@@ -369,7 +370,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
           // where Realtime events could be missed between join and useEffect firing
           console.log('[SYNC] PlayStore.joinSession: Starting realtime listener for session', sessionData.id);
           get().listenToSession(sessionData.id);
-
+          AnalyticsService.trackEvent('join_quiz', { pinCode, displayName, isMock: false, sessionId: sessionData.id });
           return true;
         } catch (err) {
           console.error('Error joining session:', err);
@@ -964,6 +965,7 @@ export const usePlayStore = create<PlayState>((set, get) => {
           console.error('Failed to submit final quiz:', e);
         }
       }
+      AnalyticsService.trackEvent('finish_quiz', { isMock, sessionId: session.id, participantId: participant.id });
     },
 
     saveAnswerState: (_questionId: string, _answerData: any) => {

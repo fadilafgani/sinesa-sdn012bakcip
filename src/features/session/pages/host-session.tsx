@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useShallow } from 'zustand/shallow';
 import { useHostStore } from '@/features/session/stores/host-store';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -19,7 +20,7 @@ export const HostSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const quizId = searchParams.get('id');
 
-  const { isMock, profile } = useAuthStore();
+  const { isMock, profile } = useAuthStore(useShallow(state => ({ isMock: state.isMock, profile: state.profile })));
   const {
     questions,
     activeSession,
@@ -37,7 +38,24 @@ export const HostSession: React.FC = () => {
     subscribeToAnswers,
     subscribeToSession,
     unsubscribeAll
-  } = useHostStore();
+  } = useHostStore(useShallow(state => ({
+    questions: state.questions,
+    activeSession: state.activeSession,
+    quiz: state.quiz,
+    participants: state.participants,
+    currentQuestion: state.currentQuestion,
+    currentOptions: state.currentOptions,
+    submissions: state.submissions,
+    createSession: state.createSession,
+    startQuiz: state.startQuiz,
+    nextQuestion: state.nextQuestion,
+    endQuiz: state.endQuiz,
+    clearSession: state.clearSession,
+    subscribeToLobby: state.subscribeToLobby,
+    subscribeToAnswers: state.subscribeToAnswers,
+    subscribeToSession: state.subscribeToSession,
+    unsubscribeAll: state.unsubscribeAll
+  })));
 
   const [pinCode, setPinCode] = useState<string>('');
   const [timer, setTimer] = useState<number>(0);
