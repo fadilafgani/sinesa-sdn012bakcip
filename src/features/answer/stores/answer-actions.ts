@@ -1,8 +1,8 @@
-import { useAnswerStore } from './answer-store';
-import { useSessionStore } from '../session/session-store';
-import { useParticipantStore } from '../participant/participant-store';
-import { useQuestionStore } from '../question/question-store';
-import { useLeaderboardStore } from '../leaderboard/leaderboard-store';
+import { useAnswerStore } from '@/features/answer/stores/answer-store';
+import { useSessionStore } from '@/features/session/stores/session-store';
+import { useParticipantStore } from '@/features/participant/stores/participant-store';
+import { useQuestionStore } from '@/features/question/stores/question-store';
+import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import { checkIsMock } from '@/features/auth/stores/auth-store';
 import { AnswerService } from '@/features/answer/services/answer.service';
 import { ParticipantService } from '@/features/participant/services/participant.service';

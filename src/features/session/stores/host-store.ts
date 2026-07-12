@@ -1,10 +1,10 @@
-import { useSessionStore } from '@/stores/session/session-store';
-import { useQuestionStore } from '@/stores/question/question-store';
-import { useParticipantStore } from '@/stores/participant/participant-store';
-import { useAnswerStore } from '@/stores/answer/answer-store';
-import { useUiStore } from '@/stores/ui/ui-store';
-import { sessionActions } from '@/stores/session/session-actions';
-import { questionActions } from '@/stores/question/question-actions';
+import { useSessionStore } from '@/features/session/stores/session-store';
+import { useQuestionStore } from '@/features/question/stores/question-store';
+import { useParticipantStore } from '@/features/participant/stores/participant-store';
+import { useAnswerStore } from '@/features/answer/stores/answer-store';
+import { useUiStore } from '@/shared/stores/ui-store';
+import { sessionActions } from '@/features/session/stores/session-actions';
+import { questionActions } from '@/features/question/stores/question-actions';
 import type { Question, QuizSession, Quiz, Participant, Option, Answer } from '@/types';
 import type { RealtimeStatus } from '@/core/realtime/realtime-types';
 

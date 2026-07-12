@@ -1,7 +1,7 @@
-import { useQuestionStore } from './question-store';
-import { useSessionStore } from '../session/session-store';
-import { useParticipantStore } from '../participant/participant-store';
-import { useAnswerStore } from '../answer/answer-store';
+import { useQuestionStore } from '@/features/question/stores/question-store';
+import { useSessionStore } from '@/features/session/stores/session-store';
+import { useParticipantStore } from '@/features/participant/stores/participant-store';
+import { useAnswerStore } from '@/features/answer/stores/answer-store';
 import { checkIsMock } from '@/features/auth/stores/auth-store';
 import { QuestionService } from '@/features/question/services/question.service';
 import { ParticipantService } from '@/features/participant/services/participant.service';
