@@ -931,7 +931,7 @@ export const sessionActions = {
         });
         useAnswerStore.setState({
           skippedQuestions: updatedPart.skipped_questions || [],
-          questionStatus: updatedPart.question_status || [],
+          questionStatus: updatedPart.question_status || {},
           isCompleted: updatedPart.is_completed || false,
         });
       }
