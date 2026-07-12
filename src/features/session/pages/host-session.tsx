@@ -1,8 +1,15 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useShallow } from 'zustand/shallow';
-import { useHostStore } from '@/features/session/stores/host-store';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
+import { useQuizSession } from '@/shared/hooks/useQuizSession';
+import { useQuestion } from '@/shared/hooks/useQuestion';
+import { useParticipants } from '@/shared/hooks/useParticipants';
+import { useAnswer } from '@/shared/hooks/useAnswer';
+import { useCountdown } from '@/shared/hooks/useCountdown';
+import { useTimer } from '@/shared/hooks/useTimer';
+import { useNavigation } from '@/shared/hooks/useNavigation';
+import { sessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
@@ -16,19 +23,14 @@ import { LazyImage } from '@/shared/components/lazy-image';
 import { getSafeMediaUrl } from '@/shared/utils/media';
 
 export const HostSession: React.FC = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const quizId = searchParams.get('id');
 
   const { isMock, profile } = useAuthStore(useShallow(state => ({ isMock: state.isMock, profile: state.profile })));
+  const { navigate } = useNavigation();
   const {
-    questions,
     activeSession,
     quiz,
-    participants,
-    currentQuestion,
-    currentOptions,
-    submissions,
     createSession,
     startQuiz,
     nextQuestion,
@@ -37,29 +39,18 @@ export const HostSession: React.FC = () => {
     subscribeToLobby,
     subscribeToAnswers,
     subscribeToSession,
-    unsubscribeAll
-  } = useHostStore(useShallow(state => ({
-    questions: state.questions,
-    activeSession: state.activeSession,
-    quiz: state.quiz,
-    participants: state.participants,
-    currentQuestion: state.currentQuestion,
-    currentOptions: state.currentOptions,
-    submissions: state.submissions,
-    createSession: state.createSession,
-    startQuiz: state.startQuiz,
-    nextQuestion: state.nextQuestion,
-    endQuiz: state.endQuiz,
-    clearSession: state.clearSession,
-    subscribeToLobby: state.subscribeToLobby,
-    subscribeToAnswers: state.subscribeToAnswers,
-    subscribeToSession: state.subscribeToSession,
-    unsubscribeAll: state.unsubscribeAll
-  })));
+    unsubscribeAll,
+    publishQuestionStage,
+    revealAnswer,
+    fetchParticipants,
+    fetchAnswers,
+    showLeaderboard,
+  } = useQuizSession();
+  const { questions, currentQuestion, currentOptions, fetchQuestions } = useQuestion();
+  const { participants } = useParticipants();
+  const { submissions } = useAnswer();
 
   const [pinCode, setPinCode] = useState<string>('');
-  const [timer, setTimer] = useState<number>(0);
-  const [countdownTimer, setCountdownTimer] = useState<number>(3);
   const [copied, setCopied] = useState<boolean>(false);
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false);
   
@@ -68,8 +59,6 @@ export const HostSession: React.FC = () => {
   const [zoomScale, setZoomScale] = useState<number>(1);
   const [zoomResetKey, setZoomResetKey] = useState<number>(0);
   
-  const timerRef = useRef<number | null>(null);
-
   const handleCopyPin = async () => {
     if (!pinCode) return;
     try {
@@ -87,7 +76,7 @@ export const HostSession: React.FC = () => {
 
   useEffect(() => {
     if (!activeSession?.id || isMock) return;
-    const unsubscribe = useHostStore.subscribe(() => {
+    const unsubscribe = sessionStore.subscribe(() => {
       setLastPollTime(new Date().toLocaleTimeString());
     });
     return () => unsubscribe();
@@ -127,7 +116,7 @@ export const HostSession: React.FC = () => {
       }
 
       // If the store already has an active session for this quiz, reuse it
-      const currentSession = useHostStore.getState().activeSession;
+      const currentSession = activeSession;
       if (currentSession && currentSession.quiz_id === quizId && currentSession.status !== 'completed') {
         console.log('HostSession: Reusing existing activeSession in store:', currentSession);
         if (isMock) {
@@ -159,7 +148,6 @@ export const HostSession: React.FC = () => {
     return () => {
       console.log('HostSession: Cleaning up session...');
       clearSession();
-      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [quizId]);
 
@@ -168,7 +156,7 @@ export const HostSession: React.FC = () => {
     if (activeSession && questions.length === 0 && quizId) {
       console.log('HostSession: Questions are empty. Starting background check...');
       const interval = setInterval(async () => {
-        const fetched = await useHostStore.getState().fetchQuestions(quizId);
+        const fetched = await fetchQuestions(quizId);
         if (fetched && fetched.length > 0) {
           console.log('HostSession: Successfully fetched questions in background. Count =', fetched.length);
           clearInterval(interval);
@@ -187,12 +175,12 @@ export const HostSession: React.FC = () => {
 
     const loadInitialData = async () => {
       try {
-        const currentStatus = useHostStore.getState().activeSession?.status;
+        const currentStatus = activeSession?.status;
         if (currentStatus === 'lobby' || currentStatus === 'active') {
-          await useHostStore.getState().fetchParticipants(sessionId);
+          await fetchParticipants(sessionId);
         }
         if (currentStatus === 'active') {
-          await useHostStore.getState().fetchAnswers(sessionId);
+          await fetchAnswers(sessionId);
         }
       } catch (err) {
         console.error('HostSession: Error loading initial data:', err);
@@ -211,63 +199,26 @@ export const HostSession: React.FC = () => {
     };
   }, [activeSession?.id, isMock, subscribeToSession, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
 
-  // Manage countdown automatically
-  useEffect(() => {
-    if (activeSession?.current_stage === 'countdown') {
-      setCountdownTimer(3);
-      const countdownInterval = setInterval(() => {
-        setCountdownTimer(prev => {
-          if (prev <= 1) {
-            clearInterval(countdownInterval);
-            // Transition to question stage in DB
-            useHostStore.getState().publishQuestionStage();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(countdownInterval);
+  // Manage countdown automatically via custom hook
+  const countdown = useCountdown(activeSession?.current_stage === 'countdown' ? 3 : 0, () => {
+    if (activeSession?.current_stage === 'countdown' && activeSession.id) {
+      publishQuestionStage();
     }
-  }, [activeSession?.current_stage, activeSession?.current_question_index]);
+  });
 
-  // Handle gameplay question timer
-  useEffect(() => {
-    if (activeSession?.current_stage === 'question' && currentQuestion) {
-      const expiresAt = activeSession.question_expires_at ? new Date(activeSession.question_expires_at).getTime() : Date.now() + 30000;
-      
-      const updateTimer = () => {
-        const secondsLeft = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-        setTimer(secondsLeft);
-
-        if (secondsLeft <= 0) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
-          handleRevealAnswer();
-        }
-      };
-
-      updateTimer();
-
-      if (timerRef.current) clearInterval(timerRef.current);
-      
-      timerRef.current = window.setInterval(updateTimer, 1000);
+  // Handle gameplay question timer via custom hook
+  const timer = useTimer({
+    expiresAt: activeSession?.question_expires_at || null,
+    enabled: activeSession?.current_stage === 'question' && !!currentQuestion,
+    onTimeUp: () => {
+      handleRevealAnswer();
     }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [activeSession?.current_question_index, activeSession?.current_stage, currentQuestion]);
+  });
 
   // Reveal correct answer
   const handleRevealAnswer = async () => {
-    if (timerRef.current) clearInterval(timerRef.current);
     try {
-      await useHostStore.getState().revealAnswer();
+      await revealAnswer();
     } catch (err) {
       console.error('Error revealing answer in DB:', err);
     }
@@ -282,7 +233,7 @@ export const HostSession: React.FC = () => {
     let currentQuestions = questions;
     if (currentQuestions.length === 0 && quizId) {
       console.log('HostSession: Questions are empty on start. Retrying fetch immediately...');
-      const fetched = await useHostStore.getState().fetchQuestions(quizId);
+      const fetched = await fetchQuestions(quizId);
       if (fetched && fetched.length > 0) {
         currentQuestions = fetched;
       }
@@ -321,7 +272,7 @@ export const HostSession: React.FC = () => {
   // Progress to showing leaderboard
   const handleShowLeaderboard = async () => {
     try {
-      await useHostStore.getState().showLeaderboard();
+      await showLeaderboard();
     } catch (err) {
       console.error('Error showing leaderboard in DB:', err);
     }
@@ -903,14 +854,14 @@ export const HostSession: React.FC = () => {
           Persiapan Soal {activeSession!.current_question_index + 1}
         </span>
         <motion.div
-          key={countdownTimer}
+          key={countdown}
           initial={{ scale: 0.5, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 1.5, opacity: 0 }}
           transition={{ duration: 0.5 }}
           className="text-8xl font-black text-primary font-mono"
         >
-          {countdownTimer}
+          {countdown}
         </motion.div>
         <p className="text-sm text-foreground font-semibold">Harap bersiap!</p>
       </motion.div>

@@ -1,8 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useShallow } from 'zustand/shallow';
-import { usePlayStore } from '@/features/session/stores/play-store';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
+import { useQuizSession } from '@/shared/hooks/useQuizSession';
+import { useQuestion } from '@/shared/hooks/useQuestion';
+import { useParticipants } from '@/shared/hooks/useParticipants';
+import { useAnswer } from '@/shared/hooks/useAnswer';
+import { useFullscreen } from '@/shared/hooks/useFullscreen';
+import { useAntiCheat } from '@/shared/hooks/useAntiCheat';
+import { useNavigation } from '@/shared/hooks/useNavigation';
+import { useTimer } from '@/shared/hooks/useTimer';
+import { useUiStore } from '@/shared/stores/ui-store';
+import { useSessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { 
@@ -17,63 +26,47 @@ import { LazyImage } from '@/shared/components/lazy-image';
 import { getSafeMediaUrl } from '@/shared/utils/media';
 
 export const PlaySession: React.FC = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, isMock: state.isMock })));
   const pin = searchParams.get('pin');
   const name = searchParams.get('name');
 
+  const { navigate } = useNavigation();
   const {
     session,
     quiz,
-    participant,
+    joinSession,
+    leaveSession,
+    stopListening,
+  } = useQuizSession();
+  const {
+    questions,
     currentQuestion,
     currentOptions,
+    currentQuestionIndex,
+    skipQuestion,
+    setQuestionProgress,
+  } = useQuestion();
+  const {
+    participant,
+    lives,
+  } = useParticipants();
+  const {
     hasAnswered,
     isAnswerCorrect,
     scoreAwarded,
-    loading,
-    submitAnswer,
-    leaveSession,
-    joinSession,
-    error: playError,
-    questions,
-    currentQuestionIndex,
-    lives,
     questionStatus,
     answersMap,
     isCompleted,
-    setQuestionProgress,
-    skipQuestion,
+    submitAnswer,
+    fetchQuestionStats,
+    fetchLeaderboard,
     submitSelfPacedAnswer,
-    submitFinalQuiz
-  } = usePlayStore(useShallow(state => ({
-    session: state.session,
-    quiz: state.quiz,
-    participant: state.participant,
-    currentQuestion: state.currentQuestion,
-    currentOptions: state.currentOptions,
-    hasAnswered: state.hasAnswered,
-    isAnswerCorrect: state.isAnswerCorrect,
-    scoreAwarded: state.scoreAwarded,
-    loading: state.loading,
-    submitAnswer: state.submitAnswer,
-    leaveSession: state.leaveSession,
-    joinSession: state.joinSession,
-    error: state.error,
-    questions: state.questions,
-    currentQuestionIndex: state.currentQuestionIndex,
-    lives: state.lives,
-    questionStatus: state.questionStatus,
-    answersMap: state.answersMap,
-    isCompleted: state.isCompleted,
-    setQuestionProgress: state.setQuestionProgress,
-    skipQuestion: state.skipQuestion,
-    submitSelfPacedAnswer: state.submitSelfPacedAnswer,
-    submitFinalQuiz: state.submitFinalQuiz
-  })));
+    submitFinalQuiz,
+  } = useAnswer();
 
-  const [localTimer, setLocalTimer] = useState(0);
+  const { loading, error: playError } = useUiStore();
+
   const showFeedback = session?.current_stage === 'question_result';
   const setShowFeedback = (_val: boolean) => {}; // Dummy to support legacy/unreachable self-paced code compilation
   const [showReviewScreen, setShowReviewScreen] = useState(false);
@@ -81,6 +74,39 @@ export const PlaySession: React.FC = () => {
   const [matchingAnswers, setMatchingAnswers] = useState<Record<string, string>>({});
   const [shuffledMatches, setShuffledMatches] = useState<string[]>([]);
   const [isProgressing, setIsProgressing] = useState(false);
+
+  // useTimer hook replacement
+  const localTimer = useTimer({
+    expiresAt: session?.question_expires_at || null,
+    enabled: session?.current_stage === 'question' && !!currentQuestion && !isCompleted && !showReviewScreen,
+    onTimeUp: () => {
+      if (!hasAnswered && currentQuestion) {
+        const qType = currentQuestion.question_type || 'multiple_choice';
+        if (qType === 'multiple_answer') {
+          submitAnswer({ optionIds: selectedOptionIdsRef.current });
+        } else if (qType === 'matching') {
+          submitAnswer({ matchingAnswers: matchingAnswersRef.current });
+        } else {
+          submitAnswer('');
+        }
+      }
+    }
+  });
+
+  // useFullscreen hook replacement
+  const {
+    isFullscreenOverlayActive,
+    enterFullscreen: enterFullscreenMode,
+  } = useFullscreen(!!(session?.status === 'active' && !isCompleted && quiz?.anti_cheat_enabled && quiz?.fullscreen_required));
+
+  // useAntiCheat hook replacement
+  const {
+    showWarningModal,
+    warningReason,
+    setShowWarningModal,
+  } = useAntiCheat({
+    enabled: !!(session?.status === 'active' && !isCompleted && quiz?.anti_cheat_enabled),
+  });
 
   const handleProgressQuestion = async (nextIdx: number) => {
     if (isProgressing) return;
@@ -107,11 +133,6 @@ export const PlaySession: React.FC = () => {
   // Diagnostics State
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [lastPollTime, setLastPollTime] = useState<string>('Never');
-
-  // Anti-Cheat states
-  const [showWarningModal, setShowWarningModal] = useState(false);
-  const [warningReason, setWarningReason] = useState('');
-  const [isFullscreenOverlayActive, setIsFullscreenOverlayActive] = useState(false);
 
   // Final Review and Leaderboard States
   const [showPostSubmitReview, setShowPostSubmitReview] = useState(false);
@@ -174,7 +195,7 @@ export const PlaySession: React.FC = () => {
   // Diagnostics sync
   useEffect(() => {
     if (!session?.id || isMock) return;
-    const unsubscribe = usePlayStore.subscribe(() => {
+    const unsubscribe = useSessionStore.subscribe(() => {
       setLastPollTime(new Date().toLocaleTimeString());
     });
     return () => unsubscribe();
@@ -196,7 +217,7 @@ export const PlaySession: React.FC = () => {
   // so we only need cleanup on unmount here.
   useEffect(() => {
     return () => {
-      usePlayStore.getState().stopListening();
+      stopListening();
     };
   }, []);
 
@@ -204,7 +225,7 @@ export const PlaySession: React.FC = () => {
   useEffect(() => {
     if (currentQuestion && hasAnswered && quiz?.show_question_statistics) {
       setLoadingStats(true);
-      usePlayStore.getState().fetchQuestionStats(currentQuestion.id)
+      fetchQuestionStats(currentQuestion.id)
         .then((stats: any) => {
           setQuestionStats(stats);
         })
@@ -223,7 +244,7 @@ export const PlaySession: React.FC = () => {
   useEffect(() => {
     if ((isCompleted || session?.status === 'completed' || session?.current_stage === 'finished') && quiz?.show_leaderboard && quiz?.show_final_result) {
       setLoadingLeaderboard(true);
-      usePlayStore.getState().fetchLeaderboard()
+      fetchLeaderboard()
         .then((res: any) => {
           setLeaderboard(res);
         })
@@ -310,174 +331,7 @@ export const PlaySession: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [session?.status, isCompleted]);
 
-  // ============================================
-  // ANTI-CHEAT LISTENERS
-  // ============================================
-  useEffect(() => {
-    if (session?.status !== 'active' || isCompleted || !quiz?.anti_cheat_enabled) {
-      setIsFullscreenOverlayActive(false);
-      return;
-    }
-
-    // 1. Prevent copy, cut, paste
-    const handleClipboard = (e: ClipboardEvent) => {
-      e.preventDefault();
-    };
-
-    // 2. Prevent context menu (right click)
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-    };
-
-    // 3. Prevent keyboard shortcuts for inspection and refresh
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Refresh keys: F5, Ctrl+R, Ctrl+F5, Ctrl+Shift+R
-      if (
-        e.key === 'F5' ||
-        (e.ctrlKey && (e.key === 'r' || e.key === 'R')) ||
-        (e.ctrlKey && e.shiftKey && (e.key === 'r' || e.key === 'R'))
-      ) {
-        e.preventDefault();
-        return;
-      }
-
-      // Dev tools: F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+Shift+C, Ctrl+U
-      if (
-        e.key === 'F12' ||
-        (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.key === 'J' || e.key === 'j' || e.key === 'C' || e.key === 'c')) ||
-        (e.ctrlKey && (e.key === 'U' || e.key === 'u'))
-      ) {
-        e.preventDefault();
-        return;
-      }
-    };
-
-    // 4. Tab switching/minimize detection via Visibility API
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        triggerViolation('Berpindah tab atau me-minimize jendela browser.');
-      }
-    };
-
-    // 5. Window blur detection (losing focus)
-    const handleWindowBlur = () => {
-      triggerViolation('Membuka aplikasi lain atau kehilangan fokus layar kuis.');
-    };
-
-    // Function to trigger violation
-    const triggerViolation = (reason: string) => {
-      const now = Date.now();
-      const lastTrigger = (window as any)._lastViolationTime || 0;
-      if (now - lastTrigger < 1500) return;
-      (window as any)._lastViolationTime = now;
-
-      usePlayStore.getState().incrementViolation().then(() => {
-        setWarningReason(reason);
-        setShowWarningModal(true);
-      });
-    };
-
-    // Attach listeners
-    window.addEventListener('copy', handleClipboard);
-    window.addEventListener('cut', handleClipboard);
-    window.addEventListener('paste', handleClipboard);
-    window.addEventListener('contextmenu', handleContextMenu);
-    window.addEventListener('keydown', handleKeyDown);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleWindowBlur);
-
-    return () => {
-      window.removeEventListener('copy', handleClipboard);
-      window.removeEventListener('cut', handleClipboard);
-      window.removeEventListener('paste', handleClipboard);
-      window.removeEventListener('contextmenu', handleContextMenu);
-      window.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, [session?.status, isCompleted, quiz?.anti_cheat_enabled, quiz?.auto_submit_on_violation]);
-
-  // Fullscreen monitor
-  useEffect(() => {
-    if (session?.status !== 'active' || isCompleted || !quiz?.anti_cheat_enabled || !quiz?.fullscreen_required) {
-      setIsFullscreenOverlayActive(false);
-      return;
-    }
-
-    const checkFullscreen = () => {
-      const isCurrentlyFullscreen = !!document.fullscreenElement;
-      setIsFullscreenOverlayActive(!isCurrentlyFullscreen);
-      
-      if (!isCurrentlyFullscreen && !isCompleted && session?.status === 'active') {
-        const now = Date.now();
-        const lastTrigger = (window as any)._lastViolationTime || 0;
-        if (now - lastTrigger >= 1500) {
-          (window as any)._lastViolationTime = now;
-          usePlayStore.getState().incrementViolation().then(() => {
-            setWarningReason('Keluar dari mode layar penuh (Fullscreen).');
-            setShowWarningModal(true);
-          });
-        }
-      }
-    };
-
-    checkFullscreen();
-    document.addEventListener('fullscreenchange', checkFullscreen);
-    return () => {
-      document.removeEventListener('fullscreenchange', checkFullscreen);
-    };
-  }, [session?.status, isCompleted, quiz?.anti_cheat_enabled, quiz?.fullscreen_required]);
-
-  const enterFullscreenMode = async () => {
-    try {
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) {
-        await elem.requestFullscreen();
-      } else if ((elem as any).webkitRequestFullscreen) {
-        await (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).msRequestFullscreen) {
-        await (elem as any).msRequestFullscreen();
-      }
-      setIsFullscreenOverlayActive(false);
-    } catch (err) {
-      console.error('Gagal masuk fullscreen:', err);
-    }
-  };
-
-  // TIMER MANAGEMENT per question
-  useEffect(() => {
-    if (session?.current_stage === 'question' && currentQuestion && !isCompleted && !showReviewScreen) {
-      const isSelfPaced = false; // Always host-paced for synchronized gameplay
-      
-      // If host-paced mode, sync with question_expires_at
-      if (!isSelfPaced) {
-        const offset = usePlayStore.getState().serverTimeOffset;
-        const expiresAt = session.question_expires_at ? new Date(session.question_expires_at).getTime() : (Date.now() - offset) + 30000;
-        const updateLegacyTimer = () => {
-          const serverNow = Date.now() - offset;
-          const diff = Math.max(0, Math.round((expiresAt - serverNow) / 1000));
-          setLocalTimer(diff);
-          if (diff <= 0) {
-            // Options are naturally locked. Auto-submit if not answered.
-            const state = usePlayStore.getState();
-            if (!state.hasAnswered) {
-              const qType = currentQuestion.question_type || 'multiple_choice';
-              if (qType === 'multiple_answer') {
-                state.submitAnswer({ optionIds: selectedOptionIdsRef.current });
-              } else if (qType === 'matching') {
-                state.submitAnswer({ matchingAnswers: matchingAnswersRef.current });
-              } else {
-                state.submitAnswer('');
-              }
-            }
-          }
-        };
-        updateLegacyTimer();
-        const interval = setInterval(updateLegacyTimer, 1000);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [session?.current_stage, session?.question_expires_at, currentQuestion?.id, hasAnswered, isCompleted, showReviewScreen]);
+  
 
 
 
@@ -528,8 +382,8 @@ export const PlaySession: React.FC = () => {
     setShowFeedback(true);
     const showResult = quiz?.show_question_result !== false && quiz?.show_correct_answer !== false;
     if (showResult) {
-      playSound(usePlayStore.getState().isAnswerCorrect ? 'correct' : 'incorrect');
-      if (usePlayStore.getState().isAnswerCorrect) {
+      playSound(isAnswerCorrect ? 'correct' : 'incorrect');
+      if (isAnswerCorrect) {
         confetti({ particleCount: 30, spread: 40, origin: { y: 0.8 } });
       }
     }
