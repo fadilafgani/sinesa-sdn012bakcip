@@ -16,6 +16,19 @@ export const useAntiCheat = ({ enabled, onViolationTriggered }: UseAntiCheatOpti
     triggerCallbackRef.current = onViolationTriggered;
   }, [onViolationTriggered]);
 
+  const triggerViolation = (reason: string) => {
+    const now = Date.now();
+    const lastTrigger = (window as any)._lastViolationTime || 0;
+    if (now - lastTrigger < 1500) return;
+    (window as any)._lastViolationTime = now;
+
+    incrementViolation().then(() => {
+      setWarningReason(reason);
+      setShowWarningModal(true);
+      triggerCallbackRef.current?.(reason);
+    });
+  };
+
   useEffect(() => {
     if (!enabled) return;
 
@@ -52,19 +65,7 @@ export const useAntiCheat = ({ enabled, onViolationTriggered }: UseAntiCheatOpti
       }
     };
 
-    // Function to trigger violation safely (throttled)
-    const triggerViolation = (reason: string) => {
-      const now = Date.now();
-      const lastTrigger = (window as any)._lastViolationTime || 0;
-      if (now - lastTrigger < 1500) return;
-      (window as any)._lastViolationTime = now;
 
-      incrementViolation().then(() => {
-        setWarningReason(reason);
-        setShowWarningModal(true);
-        triggerCallbackRef.current?.(reason);
-      });
-    };
 
     // 4. Tab switching/minimize detection via Visibility API
     const handleVisibilityChange = () => {
@@ -101,6 +102,7 @@ export const useAntiCheat = ({ enabled, onViolationTriggered }: UseAntiCheatOpti
     showWarningModal,
     warningReason,
     setShowWarningModal,
+    triggerViolation,
   };
 };
 export default useAntiCheat;

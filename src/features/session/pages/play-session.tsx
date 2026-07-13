@@ -93,19 +93,27 @@ export const PlaySession: React.FC = () => {
     }
   });
 
-  // useFullscreen hook replacement
-  const {
-    isFullscreenOverlayActive,
-    enterFullscreen: enterFullscreenMode,
-  } = useFullscreen(!!(session?.status === 'active' && !isCompleted && quiz?.anti_cheat_enabled && quiz?.fullscreen_required));
-
   // useAntiCheat hook replacement
   const {
     showWarningModal,
     warningReason,
     setShowWarningModal,
+    triggerViolation,
   } = useAntiCheat({
     enabled: !!(session?.status === 'active' && !isCompleted && quiz?.anti_cheat_enabled),
+  });
+
+  // useFullscreen hook replacement
+  const {
+    isFullscreenOverlayActive,
+    enterFullscreen: enterFullscreenMode,
+  } = useFullscreen({
+    required: !!(session?.status === 'active' && !isCompleted && quiz?.anti_cheat_enabled && quiz?.fullscreen_required),
+    onExitFullscreen: () => {
+      if (!isCompleted && session?.status === 'active') {
+        triggerViolation('Keluar dari mode layar penuh (Fullscreen).');
+      }
+    }
   });
 
   const handleProgressQuestion = async (nextIdx: number) => {

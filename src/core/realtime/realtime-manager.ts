@@ -7,7 +7,7 @@ import { ParticipantService } from '@/features/participant/services/participant.
 
 export const RealtimeManager = {
   onStatusChange(callback: (status: RealtimeStatus) => void) {
-    realtimeChannelManager.setStatusCallback(callback);
+    return realtimeChannelManager.addStatusCallback(callback);
   },
 
   connectAsHost(sessionId: string) {
@@ -71,7 +71,7 @@ export const RealtimeManager = {
 };
 
 // Wire up state recovery automatically on reconnection success
-realtimeChannelManager.setStatusCallback((status) => {
+realtimeChannelManager.addStatusCallback((status) => {
   if (status === 'CONNECTED') {
     logRealtime('Realtime Connected');
     const sessId = realtimeChannelManager.sessionId;

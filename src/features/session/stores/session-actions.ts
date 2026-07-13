@@ -551,9 +551,10 @@ export const sessionActions = {
 
     RealtimeManager.connectAsHost(sessionId);
 
-    RealtimeManager.onStatusChange((status) => {
+    const unsubStatus = RealtimeManager.onStatusChange((status) => {
       useSessionStore.setState({ realtimeStatus: status });
     });
+    realtimeUnsubs.push(unsubStatus);
 
     const unsub = realtimeEvents.on('SessionUpdated', async (updatedSess: QuizSession) => {
       if (updatedSess.id !== sessionId) return;
@@ -904,7 +905,7 @@ export const sessionActions = {
 
     RealtimeManager.connectAsStudent(sessionId, participant.id);
 
-    RealtimeManager.onStatusChange((status) => {
+    const unsubStatus = RealtimeManager.onStatusChange((status) => {
       useSessionStore.setState({ realtimeStatus: status });
     });
 
@@ -922,7 +923,7 @@ export const sessionActions = {
       }
     });
 
-    const unsubPart = realtimeEvents.on('ParticipantUpdated', (updatedPart: Participant) => {
+    const handlePartUpdate = (updatedPart: Participant) => {
       const participant = useParticipantStore.getState().participant;
       if (participant && updatedPart.id === participant.id) {
         useParticipantStore.setState({
@@ -935,9 +936,12 @@ export const sessionActions = {
           isCompleted: updatedPart.is_completed || false,
         });
       }
-    });
+    };
 
-    realtimeUnsubs.push(unsubSess, unsubPart);
+    const unsubPart = realtimeEvents.on('ParticipantUpdated', handlePartUpdate);
+    const unsubMyPart = realtimeEvents.on('MyParticipantUpdated', handlePartUpdate);
+
+    realtimeUnsubs.push(unsubStatus, unsubSess, unsubPart, unsubMyPart);
   },
 
   stopListening: () => {

@@ -6,7 +6,8 @@ import type { Participant } from '@/types';
 
 export class RealtimeChannelManager {
   private channel: any = null;
-  private statusCallback: ((status: RealtimeStatus) => void) | null = null;
+  private statusCallbacks: ((status: RealtimeStatus) => void)[] = [];
+  private legacyStatusCallback: ((status: RealtimeStatus) => void) | null = null;
   private isReconnecting = false;
   
   // Publicly exposed fields for manager to trace connection context
@@ -15,17 +16,30 @@ export class RealtimeChannelManager {
   public role: 'host' | 'student' | null = null;
   
   private heartbeatInterval: any = null;
+  private reconnectTimeout: any = null;
 
   constructor() {}
 
   setStatusCallback(cb: (status: RealtimeStatus) => void) {
-    this.statusCallback = cb;
+    this.legacyStatusCallback = cb;
+  }
+
+  addStatusCallback(cb: (status: RealtimeStatus) => void) {
+    if (!this.statusCallbacks.includes(cb)) {
+      this.statusCallbacks.push(cb);
+    }
+    return () => {
+      this.statusCallbacks = this.statusCallbacks.filter(c => c !== cb);
+    };
   }
 
   private setStatus(status: RealtimeStatus) {
     logRealtime(`Status Changed: ${status}`);
-    if (this.statusCallback) {
-      this.statusCallback(status);
+    this.statusCallbacks.forEach(cb => {
+      try { cb(status); } catch (e) { console.error('Error in status callback:', e); }
+    });
+    if (this.legacyStatusCallback) {
+      try { this.legacyStatusCallback(status); } catch (e) { console.error('Error in legacy status callback:', e); }
     }
   }
 
@@ -156,6 +170,15 @@ export class RealtimeChannelManager {
 
   unsubscribe() {
     this.stopHeartbeat();
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    this.isReconnecting = false;
+    this.sessionId = null;
+    this.role = null;
+    this.participantId = null;
+
     if (this.channel) {
       logRealtime('Unsubscribing channel');
       supabase.removeChannel(this.channel);
@@ -170,7 +193,11 @@ export class RealtimeChannelManager {
     this.setStatus('RECONNECTING');
 
     logRealtime('Attempting auto-reconnect in 3s...');
-    setTimeout(() => {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+    }
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null;
       if (this.isReconnecting && this.sessionId && this.role) {
         this.subscribe(this.sessionId, this.role, this.participantId || undefined);
       }

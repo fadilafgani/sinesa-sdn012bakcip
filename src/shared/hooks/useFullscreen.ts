@@ -1,7 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
-export const useFullscreen = (required: boolean = false) => {
+export interface UseFullscreenOptions {
+  required?: boolean;
+  onExitFullscreen?: () => void;
+}
+
+export const useFullscreen = (optionsOrRequired: boolean | UseFullscreenOptions = false) => {
+  const options = typeof optionsOrRequired === 'boolean' 
+    ? { required: optionsOrRequired } 
+    : optionsOrRequired;
+
+  const required = !!options.required;
+  const onExitFullscreen = options.onExitFullscreen;
+  
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const onExitFullscreenRef = useRef(onExitFullscreen);
+
+  useEffect(() => {
+    onExitFullscreenRef.current = onExitFullscreen;
+  }, [onExitFullscreen]);
 
   useEffect(() => {
     const checkFullscreen = () => {
@@ -10,7 +27,12 @@ export const useFullscreen = (required: boolean = false) => {
         (document as any).webkitFullscreenElement ||
         (document as any).msFullscreenElement
       );
+      
       setIsFullscreen(isFull);
+
+      if (!isFull && required) {
+        onExitFullscreenRef.current?.();
+      }
     };
 
     checkFullscreen();
@@ -20,7 +42,7 @@ export const useFullscreen = (required: boolean = false) => {
       document.removeEventListener('fullscreenchange', checkFullscreen);
       document.removeEventListener('webkitfullscreenchange', checkFullscreen);
     };
-  }, []);
+  }, [required]);
 
   const enterFullscreen = async () => {
     try {
