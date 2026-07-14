@@ -56,6 +56,7 @@ async function updateSessionStage(
   console.log('[SYNC] HostStore: Updating DB with', updates);
   const res = await SessionService.updateSession(sessionId, updates);
   if (!res.success) throw res.error;
+  console.log('DATABASE_UPDATED', updates);
   console.log('[SYNC] HostStore: DB updated. Setting local state...');
   useSessionStore.setState({ activeSession: fullSession });
   if (extraLocalState) {
@@ -876,8 +877,8 @@ export const sessionActions = {
           }
         }
 
-        console.log('[SYNC] PlayStore.joinSession: Starting realtime listener for session', sessionData.id);
-        sessionActions.listenToSession(sessionData.id);
+        // ponytail: realtime subscription is managed by play-session.tsx useEffect
+        // (keyed on session?.id) so it survives React StrictMode remounts.
         AnalyticsService.trackEvent('join_quiz', { pinCode, displayName, isMock: false, sessionId: sessionData.id });
         return true;
       } catch (err) {
@@ -917,6 +918,7 @@ export const sessionActions = {
       const isIndexChanged = !currentSession || currentSession.current_question_index !== updatedSess.current_question_index;
 
       useSessionStore.setState({ session: updatedSess });
+      console.log('STORE_UPDATED', updatedSess);
 
       if (isStageChanged || isIndexChanged) {
         await sessionActions.handleSessionUpdate(updatedSess);
@@ -962,6 +964,7 @@ export const sessionActions = {
   },
 
   handleSessionUpdate: async (updatedSess: QuizSession) => {
+    console.log('HANDLE_SESSION_UPDATE', updatedSess);
     const questions = useQuestionStore.getState().questions;
     const answersMap = useAnswerStore.getState().answersMap;
     const activeIdx = updatedSess.current_question_index;

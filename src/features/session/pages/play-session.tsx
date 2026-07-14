@@ -37,6 +37,7 @@ export const PlaySession: React.FC = () => {
     quiz,
     joinSession,
     leaveSession,
+    listenToSession,
     stopListening,
   } = useQuizSession();
   const {
@@ -115,6 +116,14 @@ export const PlaySession: React.FC = () => {
       }
     }
   });
+
+  // Component render and useEffect loggers for pembuktian debugging
+  console.log('PLAY_SESSION_RENDER', session?.current_stage);
+  console.log('RE_RENDER', session?.current_stage);
+
+  useEffect(() => {
+    console.log('USE_EFFECT_STAGE', session?.current_stage);
+  }, [session?.current_stage]);
 
   const handleProgressQuestion = async (nextIdx: number) => {
     if (isProgressing) return;
@@ -221,13 +230,17 @@ export const PlaySession: React.FC = () => {
     }
   }, [session, loading, pin, name, profile?.id]);
 
-  // ponytail: listenToSession is now called directly inside joinSession() in the store,
-  // so we only need cleanup on unmount here.
+  // Resubscribe to realtime whenever session.id is available.
+  // This handles React StrictMode double-mount: joinSession sets session.id in the store,
+  // but the StrictMode unmount fires stopListening() on the first mount, leaving the
+  // student disconnected. Keying on session?.id ensures we reconnect on the second mount.
   useEffect(() => {
+    if (!session?.id || isMock) return;
+    listenToSession(session.id);
     return () => {
       stopListening();
     };
-  }, []);
+  }, [session?.id, participant?.id, isMock]);
 
   // Fetch realtime question stats when student answers
   useEffect(() => {

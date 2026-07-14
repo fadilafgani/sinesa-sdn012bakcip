@@ -70,6 +70,7 @@ export class RealtimeChannelManager {
         filter: `id=eq.${sessionId}`,
       },
       (payload) => {
+        console.log('REALTIME_EVENT_RECEIVED', payload);
         logRealtime('Realtime Event: Session Updated');
         logRealtime('Session Updated', payload.new);
         realtimeEvents.emit('SessionUpdated', payload.new);

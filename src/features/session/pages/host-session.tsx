@@ -217,6 +217,7 @@ export const HostSession: React.FC = () => {
 
   // Reveal correct answer
   const handleRevealAnswer = async () => {
+    console.log('HOST_NEXT_STAGE', 'Guru memicu revealAnswer');
     try {
       await revealAnswer();
     } catch (err) {
@@ -226,6 +227,7 @@ export const HostSession: React.FC = () => {
 
   // Launch the quiz lobby -> active state
   const handleStartGame = async () => {
+    console.log('HOST_NEXT_STAGE', 'Guru memicu startQuiz');
     if (isStartingGame) return;
     setIsStartingGame(true);
     console.log('HostSession: handleStartGame clicked. Questions loaded =', questions.length);
@@ -271,6 +273,7 @@ export const HostSession: React.FC = () => {
 
   // Progress to showing leaderboard
   const handleShowLeaderboard = async () => {
+    console.log('HOST_NEXT_STAGE', 'Guru memicu showLeaderboard');
     try {
       await showLeaderboard();
     } catch (err) {
@@ -280,6 +283,7 @@ export const HostSession: React.FC = () => {
 
   // Progress to next question or end quiz
   const handleNextStep = async () => {
+    console.log('HOST_NEXT_STAGE', 'Guru memicu nextQuestion / nextStep');
     console.log('HostSession: handleNextStep clicked. current index =', activeSession?.current_question_index, 'total questions =', questions.length);
     if (activeSession!.current_question_index + 1 >= questions.length) {
       console.log('HostSession: all questions completed. Ending quiz...');
@@ -702,22 +706,26 @@ export const HostSession: React.FC = () => {
                   transition={{ delay: idx * 0.1 }}
                   className="hover:bg-muted/5 transition"
                 >
-                  <td className="px-6 py-4 text-foreground flex items-center gap-3">
-                    <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-black ${
-                      idx === 0 ? 'bg-yellow-400 text-yellow-950' : 
-                      idx === 1 ? 'bg-zinc-300 text-zinc-800' : 
-                      idx === 2 ? 'bg-amber-600 text-amber-50' : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {idx + 1}
-                    </span>
+                  <td className="px-6 py-4 text-foreground">
+                    <div className="flex items-center gap-3">
+                      <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-black ${
+                        idx === 0 ? 'bg-yellow-400 text-yellow-950' : 
+                        idx === 1 ? 'bg-zinc-300 text-zinc-800' : 
+                        idx === 2 ? 'bg-amber-600 text-amber-50' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {idx + 1}
+                      </span>
+                    </div>
                   </td>
-                  <td className="px-6 py-4 text-foreground flex items-center gap-2">
-                    <LazyImage
-                      src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(player.display_name)}`}
-                      alt="avatar"
-                      className="h-7 w-7 rounded-full"
-                    />
-                    <span>{player.display_name}</span>
+                  <td className="px-6 py-4 text-foreground">
+                    <div className="flex items-center gap-2">
+                      <LazyImage
+                        src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(player.display_name)}`}
+                        alt="avatar"
+                        className="h-7 w-7 rounded-full"
+                      />
+                      <span>{player.display_name}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-right text-primary font-bold">{player.score}</td>
                 </motion.tr>

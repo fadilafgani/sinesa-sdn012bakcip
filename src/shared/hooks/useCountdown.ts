@@ -8,6 +8,11 @@ export const useCountdown = (initialSeconds: number, onComplete?: () => void) =>
     callbackRef.current = onComplete;
   }, [onComplete]);
 
+  // Sync state when the caller changes the initial value (e.g., stage switch waiting→countdown)
+  useEffect(() => {
+    setSeconds(initialSeconds);
+  }, [initialSeconds]);
+
   useEffect(() => {
     if (seconds <= 0) {
       callbackRef.current?.();
