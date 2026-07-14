@@ -1,10 +1,5 @@
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
-
-// Extend jsPDF interface to include autoTable definition for compiler safety
-interface jsPDFWithAutoTable extends jsPDF {
-  autoTable: (options: any) => jsPDF;
-}
+import autoTable from 'jspdf-autotable';
 
 /**
  * Exports tabular data to a CSV file.
@@ -33,10 +28,57 @@ export const exportToCSV = (filename: string, headers: string[], rows: string[][
 };
 
 /**
+ * Exports tabular data to an Excel (XLS) file with gridlines.
+ */
+export const exportToExcel = (filename: string, headers: string[], rows: string[][]) => {
+  const tableHeader = `<tr>${headers.map(h => `<th style="background-color: #1e40af; color: #ffffff; border: 1px solid #cbd5e1; padding: 8px; font-weight: bold;">${h}</th>`).join('')}</tr>`;
+  const tableRows = rows.map(row => 
+    `<tr>${row.map(cell => `<td style="border: 1px solid #cbd5e1; padding: 6px;">${cell}</td>`).join('')}</tr>`
+  ).join('');
+
+  const html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Analisis Kuis</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+      </head>
+      <body style="font-family: sans-serif;">
+        <table style="border-collapse: collapse;">
+          <thead>${tableHeader}</thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${filename}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+/**
  * Exports tabular data to a PDF report.
  */
 export const exportToPDF = (filename: string, title: string, headers: string[], rows: string[][]) => {
-  const doc = new jsPDF() as jsPDFWithAutoTable;
+  const doc = new jsPDF();
   
   // Set main title styling
   doc.setFont('Helvetica', 'bold');
@@ -57,8 +99,8 @@ export const exportToPDF = (filename: string, title: string, headers: string[], 
   });
   doc.text(`Dihasilkan oleh SINESA pada: ${printedDate}`, 14, 30);
   
-  // Generate Table layout
-  doc.autoTable({
+  // Generate Table layout using imported function directly
+  autoTable(doc, {
     startY: 36,
     head: [headers],
     body: rows,

@@ -7,7 +7,7 @@ import { ParticipantService } from '@/features/participant/services/participant.
 import { QuestionService } from '@/features/question/services/question.service';
 import { AnswerService } from '@/features/answer/services/answer.service';
 import type { Quiz, Answer } from '@/types';
-import { exportToCSV, exportToPDF } from '@/shared/utils/export';
+import { exportToCSV, exportToPDF, exportToExcel } from '@/shared/utils/export';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { ArrowLeft, FileSpreadsheet, FileText, CheckCircle, XCircle, Award, Users, BarChart3 } from 'lucide-react';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -196,6 +196,22 @@ export const Analytics: React.FC = () => {
     exportToCSV(filename, headers, rows);
   };
 
+  const handleExportExcel = () => {
+    if (!quiz) return;
+    const filename = `analytics-${quiz.title.toLowerCase().replace(/\s+/g, '-')}`;
+    const headers = ['Peringkat', 'Nama Murid', 'Skor Total', 'Jawaban Benar', 'Jawaban Salah', 'Akurasi (%)'];
+    const rows = studentStats.map(s => [
+      s.rank.toString(),
+      s.name,
+      s.score.toString(),
+      s.correct.toString(),
+      s.incorrect.toString(),
+      `${s.accuracy}%`
+    ]);
+
+    exportToExcel(filename, headers, rows);
+  };
+
   const handleExportPDF = () => {
     if (!quiz) return;
     const filename = `analytics-${quiz.title.toLowerCase().replace(/\s+/g, '-')}`;
@@ -248,12 +264,20 @@ export const Analytics: React.FC = () => {
             <ThemeToggle />
             <div className="flex gap-2">
               <button
+                onClick={handleExportExcel}
+                className="flex items-center gap-1.5 rounded-xl bg-background border hover:bg-muted text-foreground px-3.5 py-2 text-xs font-bold transition"
+                title="Ekspor Dokumen Excel (XLS)"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Excel (XLS)
+              </button>
+              <button
                 onClick={handleExportCSV}
                 className="flex items-center gap-1.5 rounded-xl bg-background border hover:bg-muted text-foreground px-3.5 py-2 text-xs font-bold transition"
-                title="Ekspor Spreadsheet Excel (CSV)"
+                title="Ekspor Spreadsheet (CSV)"
               >
                 <FileSpreadsheet className="h-4 w-4 text-green-600" />
-                Excel (CSV)
+                CSV
               </button>
               <button
                 onClick={handleExportPDF}
