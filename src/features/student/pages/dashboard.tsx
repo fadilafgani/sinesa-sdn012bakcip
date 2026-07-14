@@ -323,9 +323,11 @@ export const StudentDashboard: React.FC = () => {
         {/* Navigation Bar */}
         <div className="flex items-center justify-between border-b pb-5">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-amber-500 flex items-center justify-center text-yellow-950 font-extrabold shadow shadow-amber-500/20">
-              S
-            </div>
+            <img 
+              src="https://sekolahanak.com/wp-content/uploads/2025/03/SDN-012-Babakan-Ciparay-logo.webp" 
+              alt="Logo SDN 012 Babakan Ciparay"
+              className="h-10 w-10 object-contain rounded-2xl bg-white p-1 shadow shadow-primary/10 border"
+            />
             <div>
               <h1 className="text-xl font-bold text-foreground">SINESA Siswa</h1>
               <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
@@ -913,6 +915,10 @@ export const StudentDashboard: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <p className="mt-12 text-center text-xs text-muted-foreground font-semibold">
+        Untuk SDN 012 Babakan Ciparay dari Telkom University
+      </p>
     </div>
   );
 };

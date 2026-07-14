@@ -202,15 +202,20 @@ export const Login: React.FC = () => {
             initial={{ scale: 0.8 }}
             animate={{ scale: 1 }}
             transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="inline-flex h-16 w-16 items-center justify-center rounded-3xl bg-primary text-primary-foreground shadow-lg shadow-primary/20 mb-3"
+            className="inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-primary-foreground shadow-lg shadow-primary/10 mb-4 p-2"
           >
-            <School className="h-9 w-9 text-yellow-300" />
+            <img 
+              src="https://sekolahanak.com/wp-content/uploads/2025/03/SDN-012-Babakan-Ciparay-logo.webp" 
+              alt="Logo SDN 012 Babakan Ciparay"
+              className="h-16 w-16 object-contain"
+            />
           </motion.div>
           <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
             SINESA
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground font-medium">
-            Sistem Evaluasi Pembelajaran Siswa Realtime
+          <p className="mt-1.5 text-sm text-muted-foreground font-medium flex flex-col items-center">
+            <span>Sistem Evaluasi Pembelajaran Siswa Realtime</span>
+            <span className="text-xs font-bold text-primary mt-1">SDN 012 Babakan Ciparay</span>
           </p>
         </div>
 
@@ -380,6 +385,11 @@ export const Login: React.FC = () => {
             )}
           </div>
         </div>
+
+        {/* Footer */}
+        <p className="mt-8 text-center text-xs text-muted-foreground font-semibold">
+          Untuk SDN 012 Babakan Ciparay dari Telkom University
+        </p>
       </motion.div>
     </div>
   );
