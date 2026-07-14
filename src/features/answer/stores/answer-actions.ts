@@ -109,11 +109,13 @@ export const answerActions = {
       localStorage.setItem(partsKey, JSON.stringify(updatedParts));
 
       useParticipantStore.setState({ participant: updatedPart, lives: newLives });
+      const currentAnswersMap = useAnswerStore.getState().answersMap;
       useAnswerStore.setState({
         questionStatus: updatedStatuses,
         hasAnswered: true,
         isAnswerCorrect: isCorrect,
         scoreAwarded,
+        answersMap: { ...currentAnswersMap, [currentQuestion.id]: newAnswer }
       });
       return;
     }
@@ -143,12 +145,27 @@ export const answerActions = {
       const updatedPart = updateRes.data;
 
       if (updatedPart) {
+        const submittedAnswer: Answer = {
+          id: insertRes.data?.id || `ans-${currentQuestion.id}`,
+          participant_id: participant.id,
+          question_id: currentQuestion.id,
+          selected_option_id: optionIdToSave,
+          selected_option_ids: optionIdsToSave,
+          matching_answers: matchingAnswersToSave,
+          is_correct: isCorrect,
+          response_time_ms: responseTime,
+          score_awarded: scoreAwarded,
+          answered_at: now.toISOString(),
+        };
+        const currentAnswersMap = useAnswerStore.getState().answersMap;
+
         useParticipantStore.setState({ participant: updatedPart as Participant, lives: newLives });
         useAnswerStore.setState({
           questionStatus: updatedStatuses,
           hasAnswered: true,
           isAnswerCorrect: isCorrect,
           scoreAwarded,
+          answersMap: { ...currentAnswersMap, [currentQuestion.id]: submittedAnswer }
         });
       }
     } catch (err: any) {
