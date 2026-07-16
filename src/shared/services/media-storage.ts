@@ -2,6 +2,7 @@
  * Media Storage Service for SINESA
  * Handles file upload, replace, delete, and client-side optimization.
  */
+import { supabase } from '@/core/supabase';
 
 export interface MediaUploadOptions {
   type: 'profiles' | 'thumbnails' | 'quiz-images' | 'quiz-audio' | 'quiz-videos';
@@ -106,11 +107,16 @@ const retryPromise = <T>(
 const uploadWithXHR = (
   url: string,
   formData: FormData,
+  token: string,
   onProgress?: (progress: number) => void
 ): Promise<MediaUploadResult> => {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
+
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
 
     if (xhr.upload && onProgress) {
       xhr.upload.onprogress = (event) => {
@@ -185,9 +191,13 @@ class MediaStorageService implements IMediaStorageService {
     formData.append('type', options.type);
     formData.append('action', 'upload');
 
-    // 3. Upload with retry logic
+    // 3. Retrieve auth session token
+    const sessionRes = await supabase.auth.getSession();
+    const token = sessionRes.data.session?.access_token || '';
+
+    // 4. Upload with retry logic
     return retryPromise(
-      () => uploadWithXHR(apiUrl, formData, options.onProgress),
+      () => uploadWithXHR(apiUrl, formData, token, options.onProgress),
       retries
     );
   }
@@ -210,9 +220,17 @@ class MediaStorageService implements IMediaStorageService {
     formData.append('type', type);
     formData.append('file_url', fileUrl);
 
+    const sessionRes = await supabase.auth.getSession();
+    const token = sessionRes.data.session?.access_token || '';
+
     try {
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
       const response = await fetch(apiUrl, {
         method: 'POST',
+        headers,
         body: formData
       });
       const data = await response.json();

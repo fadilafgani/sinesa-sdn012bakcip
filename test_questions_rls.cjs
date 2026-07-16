@@ -49,6 +49,13 @@ async function run() {
     .select('id, status')
     .limit(1);
   console.log('5. Quiz Sessions read:', sessErr ? `ERROR: ${sessErr.message}` : `Success (${sessions.length} rows)`);
+
+  // Test 6: Read answers table anonymously
+  const { data: answers, error: ansErr } = await supabase
+    .from('answers')
+    .select('id, is_correct, score_awarded')
+    .limit(1);
+  console.log('6. Answers read:', ansErr ? `ERROR: ${ansErr.message}` : `Success (${answers.length} rows)`);
 }
 
 run();

@@ -16,6 +16,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
 
+// Helper to get environment variables from root .env
+function get_env_var($name) {
+    $env_file = __DIR__ . '/../../.env';
+    if (!file_exists($env_file)) return null;
+    $lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue;
+        $parts = explode('=', $line, 2);
+        if (count($parts) === 2 && trim($parts[0]) === $name) {
+            $val = trim($parts[1]);
+            if (strpos($val, '"') === 0 && strrpos($val, '"') === strlen($val) - 1) {
+                $val = substr($val, 1, -1);
+            }
+            return $val;
+        }
+    }
+    return null;
+}
+
+// Verify Supabase Auth JWT token
+function is_authorized($supabase_url, $supabase_anon_key) {
+    // Read Authorization header
+    $auth_header = '';
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $auth_header = $_SERVER['HTTP_AUTHORIZATION'];
+    } else {
+        $headers = getallheaders();
+        foreach ($headers as $key => $val) {
+            if (strtolower($key) === 'authorization') {
+                $auth_header = $val;
+                break;
+            }
+        }
+    }
+
+    if (empty($auth_header)) {
+        return false;
+    }
+
+    // Extract Bearer token
+    if (preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
+        $token = $matches[1];
+    } else {
+        return false;
+    }
+
+    // Contact Supabase to verify JWT authenticity
+    $ch = curl_init(rtrim($supabase_url, '/') . '/auth/v1/user');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $token,
+        'apikey: ' . $supabase_anon_key
+    ]);
+
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    return ($http_code === 200);
+}
+
+// Enforce authentication for upload/delete POST operations
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $supabase_url = get_env_var('VITE_SUPABASE_URL');
+    $supabase_anon_key = get_env_var('VITE_SUPABASE_ANON_KEY');
+
+    if ($supabase_url && $supabase_anon_key) {
+        if (!is_authorized($supabase_url, $supabase_anon_key)) {
+            http_response_code(401);
+            echo json_encode([
+                'success' => false,
+                'message' => 'Unauthorized: Invalid or missing Supabase token.'
+            ]);
+            exit();
+        }
+    }
+}
+
 // Helper to generate UUID v4
 function generate_uuid() {
     return sprintf(
