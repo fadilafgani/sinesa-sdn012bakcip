@@ -110,10 +110,11 @@ export class RealtimeChannelManager {
         event: '*',
         schema: 'public',
         table: 'participants',
+        filter: `session_id=eq.${sessionId}`,
       },
       (payload) => {
         const part = (payload.new || payload.old) as Participant;
-        if (!part || part.session_id !== sessionId) return;
+        if (!part) return;
 
         if (payload.eventType === 'INSERT') {
           logRealtime('Participant Joined event', part);
