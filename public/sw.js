@@ -1,12 +1,12 @@
-const CACHE_NAME = 'sinesa-cache-v1';
+const CACHE_NAME = 'sinesa-cache-v2';
 const SHELL_RESOURCES = [
   '/',
   '/index.html',
-  '/manifest.json',
+  '/manifest.json?v=2',
   '/favicon.svg',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/icon-maskable.png'
+  '/icon-192.png?v=2',
+  '/icon-512.png?v=2',
+  '/icon-maskable.png?v=2'
 ];
 
 // Install Event - Pre-cache Shell Resources
