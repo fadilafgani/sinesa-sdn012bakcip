@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Logo Converter</title>
+</head>
+<body style="background: #222; color: #fff; font-family: sans-serif; padding: 20px;">
+  <h2>SINESA PWA Logo Generator</h2>
+  <p>Loading school logo from sekolahanak.com...</p>
+  
+  <img id="source" src="https://sekolahanak.com/wp-content/uploads/2025/03/SDN-012-Babakan-Ciparay-logo.webp" crossOrigin="anonymous" style="display:none;" />
+
+  <div>
+    <h3>Data URLs:</h3>
+    <div>
+      <label>192x192 PNG (Standard):</label><br/>
+      <textarea id="data-192" style="width: 80%; height: 80px;"></textarea>
+    </div>
+    <div style="margin-top: 15px;">
+      <label>512x512 PNG (Standard):</label><br/>
+      <textarea id="data-512" style="width: 80%; height: 80px;"></textarea>
+    </div>
+    <div style="margin-top: 15px;">
+      <label>512x512 PNG (Maskable - Solid dark background):</label><br/>
+      <textarea id="data-maskable" style="width: 80%; height: 80px;"></textarea>
+    </div>
+  </div>
+
+  <div style="margin-top: 20px;">
+    <canvas id="canvas-192" width="192" height="192" style="border: 1px solid #555;"></canvas>
+    <canvas id="canvas-512" width="512" height="512" style="border: 1px solid #555;"></canvas>
+    <canvas id="canvas-maskable" width="512" height="512" style="border: 1px solid #555;"></canvas>
+  </div>
+
+  <script>
+    const img = document.getElementById('source');
+    
+    img.onload = () => {
+      console.log('Image loaded successfully');
+      
+      // 1. Draw 192x192
+      const canvas192 = document.getElementById('canvas-192');
+      const ctx192 = canvas192.getContext('2d');
+      ctx192.drawImage(img, 0, 0, 192, 192);
+      document.getElementById('data-192').value = canvas192.toDataURL('image/png');
+
+      // 2. Draw 512x512
+      const canvas512 = document.getElementById('canvas-512');
+      const ctx512 = canvas512.getContext('2d');
+      ctx512.drawImage(img, 0, 0, 512, 512);
+      document.getElementById('data-512').value = canvas512.toDataURL('image/png');
+
+      // 3. Draw Maskable (with #09090b background, logo slightly centered inside safe zone)
+      const canvasMaskable = document.getElementById('canvas-maskable');
+      const ctxMaskable = canvasMaskable.getContext('2d');
+      ctxMaskable.fillStyle = '#09090b';
+      ctxMaskable.fillRect(0, 0, 512, 512);
+      
+      // Safe zone is 70% of 512 = 358px. Margin is (512 - 358) / 2 = 77px
+      ctxMaskable.drawImage(img, 77, 77, 358, 358);
+      document.getElementById('data-maskable').value = canvasMaskable.toDataURL('image/png');
+      
+      // Add status indicator for the subagent
+      const indicator = document.createElement('div');
+      indicator.id = 'conversion-complete';
+      indicator.innerText = 'COMPLETE';
+      document.body.appendChild(indicator);
+    };
+
+    img.onerror = () => {
+      console.error('Failed to load image');
+      const indicator = document.createElement('div');
+      indicator.id = 'conversion-failed';
+      indicator.innerText = 'FAILED';
+      document.body.appendChild(indicator);
+    };
+  </script>
+</body>
+</html>
