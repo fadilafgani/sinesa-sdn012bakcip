@@ -5,7 +5,7 @@ import { AuthService } from '@/features/auth/services/auth.service';
 import { SettingsService } from '@/features/settings/services/settings.service';
 import type { UserRole } from '@/types';
 import { motion } from 'framer-motion';
-import { KeyRound, Mail, User, Shield, GraduationCap, School, AlertCircle, CheckCircle } from 'lucide-react';
+import { KeyRound, Mail, User, Shield, GraduationCap, School, AlertCircle, CheckCircle, Download, X } from 'lucide-react';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 
 export const Login: React.FC = () => {
@@ -22,6 +22,48 @@ export const Login: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+
+  // PWA installation states
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [isIOSDevice, setIsIOSDevice] = useState(false);
+
+  useEffect(() => {
+    // Check if already in standalone mode
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    if (isStandalone) return;
+
+    // Detect iOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    setIsIOSDevice(isIOS);
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // If iOS and not standalone, show help instructions
+    if (isIOS) {
+      setShowInstallBanner(true);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setShowInstallBanner(false);
+    }
+    setDeferredPrompt(null);
+  };
 
   // Check if self-registration is enabled from DB or mock settings
   useEffect(() => {
@@ -196,6 +238,45 @@ export const Login: React.FC = () => {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md"
       >
+        {/* PWA Install Banner */}
+        {showInstallBanner && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 flex items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4 text-sm text-foreground shadow-lg backdrop-blur-md"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <Download className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-bold text-xs text-foreground">Pasang Aplikasi SINESA</p>
+                <p className="text-[10px] leading-snug text-muted-foreground mt-0.5">
+                  {isIOSDevice 
+                    ? "Tekan tombol 'Bagikan' (Share) lalu 'Tambahkan ke Layar Utama' di Safari." 
+                    : "Pasang di HP / Laptop untuk akses cepat & hemat kuota."}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {!isIOSDevice && (
+                <button
+                  onClick={handleInstallClick}
+                  className="shrink-0 rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition-all active:scale-95 shadow-md shadow-primary/20"
+                >
+                  Pasang
+                </button>
+              )}
+              <button
+                onClick={() => setShowInstallBanner(false)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-muted-foreground/10 text-muted-foreground transition-all"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
         {/* Title Brand Header */}
         <div className="mb-6 text-center">
           <motion.div 
