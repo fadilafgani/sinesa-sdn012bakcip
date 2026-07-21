@@ -295,7 +295,7 @@ export const Login: React.FC = () => {
             SINESA
           </h1>
           <p className="mt-1.5 text-sm text-muted-foreground font-medium flex flex-col items-center">
-            <span>Sistem Evaluasi Pembelajaran Siswa Realtime</span>
+            <span>Sistem Nilai Dan Evaluasi Siswa Aktif</span>
             <span className="text-xs font-bold text-primary mt-1">SDN 012 Babakan Ciparay</span>
           </p>
         </div>
