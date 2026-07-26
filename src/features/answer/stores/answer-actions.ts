@@ -134,7 +134,10 @@ export const answerActions = {
 
       if (!insertRes.success) throw insertRes.error;
 
-      const newScore = participant.score + scoreAwarded;
+      const actualScore = insertRes.data?.score_awarded ?? scoreAwarded;
+      const actualIsCorrect = insertRes.data?.is_correct ?? isCorrect;
+
+      const newScore = participant.score + actualScore;
       const updateRes = await ParticipantService.updateParticipant(participant.id, {
         score: newScore,
         lives: newLives,
@@ -152,9 +155,9 @@ export const answerActions = {
           selected_option_id: optionIdToSave,
           selected_option_ids: optionIdsToSave,
           matching_answers: matchingAnswersToSave,
-          is_correct: isCorrect,
+          is_correct: actualIsCorrect,
           response_time_ms: responseTime,
-          score_awarded: scoreAwarded,
+          score_awarded: actualScore,
           answered_at: now.toISOString(),
         };
         const currentAnswersMap = useAnswerStore.getState().answersMap;
@@ -163,8 +166,8 @@ export const answerActions = {
         useAnswerStore.setState({
           questionStatus: updatedStatuses,
           hasAnswered: true,
-          isAnswerCorrect: isCorrect,
-          scoreAwarded,
+          isAnswerCorrect: actualIsCorrect,
+          scoreAwarded: actualScore,
           answersMap: { ...currentAnswersMap, [currentQuestion.id]: submittedAnswer }
         });
       }
