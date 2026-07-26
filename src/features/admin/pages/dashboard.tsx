@@ -25,7 +25,8 @@ import {
   EyeOff,
   ChevronLeft,
   ChevronRight,
-  UploadCloud
+  UploadCloud,
+  Menu
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -38,6 +39,7 @@ export const AdminDashboard: React.FC = () => {
   const { signOut, isMock, profile: adminProfile } = useAuthStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'quizzes' | 'logs' | 'settings'>('dashboard');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Unified Loading States
   const [loading, setLoading] = useState(true);
@@ -933,7 +935,7 @@ export const AdminDashboard: React.FC = () => {
   return (
     <div className="flex h-screen w-screen bg-mesh overflow-hidden text-foreground">
       {/* 1. SIDEBAR NAVIGATION */}
-      <div className="w-64 bg-card/85 backdrop-blur-md border-r border-border flex flex-col justify-between shrink-0 z-10">
+      <div className={`bg-card/85 backdrop-blur-md flex flex-col justify-between shrink-0 z-10 transition-all duration-300 ${isSidebarCollapsed ? 'w-0 overflow-hidden border-none' : 'w-64 border-r border-border'}`}>
         <div>
           {/* Brand Header */}
           <div className="p-6 border-b border-border flex items-center gap-3">
@@ -1049,6 +1051,13 @@ export const AdminDashboard: React.FC = () => {
         {/* Top Navbar */}
         <header className="h-16 border-b border-border bg-card/40 backdrop-blur-md flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              className="p-2 -ml-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition active:scale-95 shrink-0"
+              title={isSidebarCollapsed ? "Tampilkan Sidebar" : "Sembunyikan Sidebar"}
+            >
+              <Menu className="h-5 w-5" />
+            </button>
             <h2 className="text-lg font-black text-foreground tracking-tight capitalize">
               {activeTab === 'dashboard' && 'Dashboard Utama'}
               {activeTab === 'users' && 'Manajemen Pengguna'}
