@@ -247,7 +247,7 @@ export const Analytics: React.FC = () => {
       <div className="max-w-6xl mx-auto space-y-6">
         
         {/* Navigation header */}
-        <div className="flex items-center justify-between border-b pb-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between border-b pb-4">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/teacher/dashboard')}
@@ -260,9 +260,9 @@ export const Analytics: React.FC = () => {
               <p className="text-xs text-muted-foreground">Laporan ringkas akurasi dan kinerja pemahaman murid</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-between md:justify-end">
             <ThemeToggle />
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleExportExcel}
                 className="flex items-center gap-1.5 rounded-xl bg-background border hover:bg-muted text-foreground px-3.5 py-2 text-xs font-bold transition"
@@ -392,13 +392,15 @@ export const Analytics: React.FC = () => {
                             {student.rank}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-foreground flex items-center gap-2">
-                          <img
-                            src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(student.name)}`}
-                            alt="avatar"
-                            className="h-7 w-7 rounded-full border"
-                          />
-                          <span>{student.name}</span>
+                        <td className="px-6 py-4 text-foreground">
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(student.name)}`}
+                              alt="avatar"
+                              className="h-7 w-7 rounded-full border"
+                            />
+                            <span>{student.name}</span>
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${
