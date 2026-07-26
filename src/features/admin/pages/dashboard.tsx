@@ -31,7 +31,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '@/shared/utils/swal';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from 'recharts';
 import { LazyImage } from '@/shared/components/lazy-image';
 import { mediaStorageService } from '@/shared/services/media-storage';
 
@@ -1140,29 +1140,41 @@ export const AdminDashboard: React.FC = () => {
                         </h4>
                         <div className="h-64">
                           <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={userStatsData}>
-                              <XAxis dataKey="name" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
-                              <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
-                              <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px', color: '#fff' }} />
-                              <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={50} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
+                             <BarChart data={userStatsData}>
+                               <XAxis dataKey="name" stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
+                               <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
+                               <Tooltip 
+                                 contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px', color: '#fff' }}
+                                 itemStyle={{ color: '#fff' }}
+                                 labelStyle={{ color: '#fff' }}
+                               />
+                               <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={50}>
+                                 {userStatsData.map((entry, index) => (
+                                   <Cell key={`cell-${index}`} fill={entry.fill} />
+                                 ))}
+                               </Bar>
+                             </BarChart>
+                           </ResponsiveContainer>
+                         </div>
+                       </div>
 
-                      {/* Quiz activity chart */}
-                      <div className="glass-panel p-6 rounded-3xl border bg-card/10 space-y-4">
-                        <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                          <Activity className="h-4 w-4 text-yellow-500" /> Statistik Aktivitas Evaluasi
-                        </h4>
-                        <div className="h-64">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={quizActivityData}>
-                              <XAxis dataKey="name" stroke="#888888" fontSize={10} tickLine={false} axisLine={false} />
-                              <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
-                              <Tooltip contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px', color: '#fff' }} />
-                              <Bar dataKey="count" fill="#fbbf24" radius={[8, 8, 0, 0]} maxBarSize={45} />
-                            </BarChart>
+                       {/* Quiz activity chart */}
+                       <div className="glass-panel p-6 rounded-3xl border bg-card/10 space-y-4">
+                         <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                           <Activity className="h-4 w-4 text-yellow-500" /> Statistik Aktivitas Evaluasi
+                         </h4>
+                         <div className="h-64">
+                           <ResponsiveContainer width="100%" height="100%">
+                             <BarChart data={quizActivityData}>
+                               <XAxis dataKey="name" stroke="#888888" fontSize={10} tickLine={false} axisLine={false} />
+                               <YAxis stroke="#888888" fontSize={11} tickLine={false} axisLine={false} />
+                               <Tooltip 
+                                 contentStyle={{ background: '#18181b', border: '1px solid #27272a', borderRadius: '12px', fontSize: '12px', color: '#fff' }}
+                                 itemStyle={{ color: '#fff' }}
+                                 labelStyle={{ color: '#fff' }}
+                               />
+                               <Bar dataKey="count" fill="#fbbf24" radius={[8, 8, 0, 0]} maxBarSize={45} />
+                             </BarChart>
                           </ResponsiveContainer>
                         </div>
                       </div>
