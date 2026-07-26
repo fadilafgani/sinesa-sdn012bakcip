@@ -328,3 +328,44 @@ BEGIN
 END;
 $$;
 
+
+-- =========================================================================
+-- SERVER-SIDE ANSWER GRADING SECURITY TRIGGER
+-- =========================================================================
+-- Automatically calculates and overrides 'is_correct' and 'score_awarded'
+-- at the database level on insert based on options and questions.
+CREATE OR REPLACE FUNCTION public.calculate_answer_score()
+RETURNS TRIGGER AS $$
+DECLARE
+  is_option_correct BOOLEAN;
+  question_points INTEGER;
+BEGIN
+  -- Get the correct status from options table
+  SELECT is_correct INTO is_option_correct 
+  FROM public.options 
+  WHERE id = NEW.selected_option_id;
+  
+  -- Get the points from questions table
+  SELECT points INTO question_points 
+  FROM public.questions 
+  WHERE id = NEW.question_id;
+  
+  -- Override/sanitize client-provided values
+  NEW.is_correct := COALESCE(is_option_correct, false);
+  NEW.score_awarded := CASE 
+    WHEN NEW.is_correct THEN COALESCE(question_points, 0) 
+    ELSE 0 
+  END;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Bind trigger to BEFORE INSERT
+DROP TRIGGER IF EXISTS trigger_calculate_answer_score ON public.answers;
+CREATE TRIGGER trigger_calculate_answer_score
+BEFORE INSERT ON public.answers
+FOR EACH ROW
+EXECUTE FUNCTION public.calculate_answer_score();
+
+
