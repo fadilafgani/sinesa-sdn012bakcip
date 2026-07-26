@@ -917,17 +917,17 @@ export const AdminDashboard: React.FC = () => {
 
   // Chart Data preparation
   const userStatsData = [
-    { name: 'Admin', count: profiles.filter(p => p.role === 'admin').length, fill: '#ef4444' },
-    { name: 'Guru', count: totalTeachersCount, fill: '#3b82f6' },
-    { name: 'Murid', count: totalStudentsCount, fill: '#f59e0b' }
+    { name: 'Admin', total: profiles.filter(p => p.role === 'admin').length, fill: '#ef4444' },
+    { name: 'Guru', total: totalTeachersCount, fill: '#3b82f6' },
+    { name: 'Murid', total: totalStudentsCount, fill: '#f59e0b' }
   ];
 
   const quizActivityData = [
-    { name: 'Kuis Aktif', count: quizzes.filter(q => q.status === 'active').length },
-    { name: 'Kuis Nonaktif', count: quizzes.filter(q => q.status === 'inactive').length },
-    { name: 'Sesi Lobby', count: sessions.filter(s => s.status === 'lobby').length },
-    { name: 'Sesi Aktif', count: sessions.filter(s => s.status === 'active').length },
-    { name: 'Sesi Selesai', count: sessions.filter(s => s.status === 'completed').length }
+    { name: 'Kuis Aktif', total: quizzes.filter(q => q.status === 'active').length },
+    { name: 'Kuis Nonaktif', total: quizzes.filter(q => q.status === 'inactive').length },
+    { name: 'Sesi Lobby', total: sessions.filter(s => s.status === 'lobby').length },
+    { name: 'Sesi Aktif', total: sessions.filter(s => s.status === 'active').length },
+    { name: 'Sesi Selesai', total: sessions.filter(s => s.status === 'completed').length }
   ];
 
   return (
@@ -1146,7 +1146,7 @@ export const AdminDashboard: React.FC = () => {
                                  itemStyle={{ color: '#fff' }}
                                  labelStyle={{ color: '#fff' }}
                                />
-                               <Bar dataKey="count" radius={[8, 8, 0, 0]} maxBarSize={50}>
+                               <Bar dataKey="total" radius={[8, 8, 0, 0]} maxBarSize={50}>
                                  {userStatsData.map((entry, index) => (
                                    <Cell key={`cell-${index}`} fill={entry.fill} />
                                  ))}
@@ -1171,7 +1171,7 @@ export const AdminDashboard: React.FC = () => {
                                  itemStyle={{ color: '#fff' }}
                                  labelStyle={{ color: '#fff' }}
                                />
-                               <Bar dataKey="count" fill="#fbbf24" radius={[8, 8, 0, 0]} maxBarSize={45} />
+                               <Bar dataKey="total" fill="#fbbf24" radius={[8, 8, 0, 0]} maxBarSize={45} />
                              </BarChart>
                           </ResponsiveContainer>
                         </div>
