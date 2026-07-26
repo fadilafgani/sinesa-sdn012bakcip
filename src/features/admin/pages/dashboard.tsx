@@ -420,15 +420,13 @@ export const AdminDashboard: React.FC = () => {
       const savedLogs = JSON.parse(localStorage.getItem('mock_activity_logs') || '[]');
       localStorage.setItem('mock_activity_logs', JSON.stringify([newLog, ...savedLogs].slice(0, 100)));
     } else {
-      try {
-        if (adminProfile?.id) {
-          await supabase.from('activity_logs').insert({
-            user_id: adminProfile.id,
-            action: 'LOGOUT',
-            details: 'Administrator logout dari panel.'
-          });
-        }
-      } catch(e){}
+      if (adminProfile?.id) {
+        supabase.from('activity_logs').insert({
+          user_id: adminProfile.id,
+          action: 'LOGOUT',
+          details: 'Administrator logout dari panel.'
+        }).then(() => {}); // ponytail: fire and forget to avoid blocking signout on network issues
+      }
     }
 
     await signOut();
