@@ -99,10 +99,9 @@ class Database {
             self::$instance = new PDO($dsn, $user, $pass, $options);
             return self::$instance;
         } catch (PDOException $e) {
-            // Log real database error and return diagnostic details to quickly resolve connection
+            // Log real database error privately
             error_log('[SINESA_DB_ERROR] Connection failed: ' . $e->getMessage());
-            $debugMsg = 'Gagal menghubungkan ke database: ' . $e->getMessage() . " (Host: {$host}, Port: {$port}, Database: {$dbName}, User: {$user})";
-            send_error_response($debugMsg, 500);
+            send_error_response('Gagal menghubungkan ke database server.', 500);
         }
     }
 }
