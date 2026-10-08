@@ -27,10 +27,10 @@ DROP TABLE IF EXISTS `activity_logs`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `activity_logs` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `user_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `action` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `details` text COLLATE utf8mb4_unicode_ci,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `action` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `details` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_activity_logs_user_id` (`user_id`),
@@ -57,10 +57,10 @@ DROP TABLE IF EXISTS `answers`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `answers` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `participant_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `question_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `selected_option_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `participant_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `question_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `selected_option_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `selected_option_ids` json DEFAULT NULL,
   `matching_answers` json DEFAULT NULL,
   `is_correct` tinyint(1) NOT NULL DEFAULT '0',
@@ -133,13 +133,13 @@ DROP TABLE IF EXISTS `media_files`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `media_files` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `user_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `original_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `stored_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `file_path` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `file_type` enum('image','audio','document') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `mime_type` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `original_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `stored_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `file_path` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `file_type` enum('image','audio','document') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `mime_type` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `file_size` bigint NOT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -168,11 +168,11 @@ DROP TABLE IF EXISTS `options`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `options` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `question_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `option_text` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `question_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `option_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `is_correct` tinyint(1) NOT NULL DEFAULT '0',
-  `match_text` text COLLATE utf8mb4_unicode_ci,
+  `match_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_options_question_id` (`question_id`),
@@ -199,10 +199,10 @@ DROP TABLE IF EXISTS `participants`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `participants` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `session_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `student_id` varchar(36) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `display_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `session_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `student_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `display_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `score` int NOT NULL DEFAULT '0',
   `lives` int NOT NULL DEFAULT '3',
   `skipped_questions` json DEFAULT NULL,
@@ -239,14 +239,14 @@ DROP TABLE IF EXISTS `profiles`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `profiles` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `role` enum('admin','teacher','student') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
-  `full_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `email` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `password_hash` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `username` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `avatar_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `status` enum('active','inactive') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `role` enum('admin','teacher','student') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'student',
+  `full_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `password_hash` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `username` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `avatar_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` enum('active','inactive') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -263,7 +263,7 @@ CREATE TABLE `profiles` (
 
 LOCK TABLES `profiles` WRITE;
 /*!40000 ALTER TABLE `profiles` DISABLE KEYS */;
-INSERT INTO `profiles` VALUES ('00000000-0000-0000-0000-000000000001','admin','Administrator SINESA','admin@sinesa.com','$2y$10$mB5k.2cQf4G7Mh1e9P0nXeQ6v4L5e2W1x9Z8y7V6u5T4r3Q2P1O0a','admin',NULL,'active','2026-10-07 10:54:38','2026-10-07 10:54:38'),('00000000-0000-0000-0000-000000000002','teacher','Guru Pertiwi Tester','pertiwi_test@sinesa.com','$2y$10','pertiwitest',NULL,'active','2026-10-07 12:41:11','2026-10-07 12:41:11'),('00000000-0000-0000-0000-000000000003','student','Budi Santoso Terupdate','budi_test@sinesa.com','$2y$10','budi_updated_1791355562',NULL,'active','2026-10-07 12:41:11','2026-10-07 13:46:02'),('11111111-1111-1111-1111-111111111111','admin','Administrator Regression','regression_admin@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_admin',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:46'),('1ca6afb4-a4eb-4903-976b-5fe0b38bef4e','teacher','Guru Pengajar','teacher_1ca6afb4@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('2164db44-350e-4b9b-93c7-69b09b8dbb6b','teacher','Guru Pengajar','teacher_2164db44@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('22222222-2222-2222-2222-222222222222','teacher','Ibu Guru Pertiwi M.Pd','regression_teacher@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_teacher',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:47'),('26f39082-3108-41fd-8867-6e516af0e80a','teacher','Guru Pengajar','teacher_26f39082@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('29109c56-da85-4bf4-becb-a707f4e3a20b','teacher','Guru Pengajar','teacher_29109c56@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('33333333-3333-3333-3333-333333333333','student','Siswa Budi Santoso','regression_student@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_student',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:46'),('378c481f-76bf-4e9d-adbb-a6f7e2cc5952','student','Yudi Santosa','student_378c481f@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19','student','Murid DebugMurid Debug','student_4b7cd3e0@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('65ab83a4-be85-4565-b518-0fb783337215','student','budi','student_65ab83a4@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('da544f24-1b45-40b8-88dc-1a418ed6ae2d','teacher','Guru Pengajar','teacher_da544f24@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('e763f0fa-588e-4720-a940-91904a0048b7','teacher','Guru Pengajar','teacher_e763f0fa@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('fd86258e-bad0-4fe0-b73f-72387bf185fc','student','User Temp Regression','temp_crud_1791427815@sinesa.com','$2y$10$gzmJGR0hT5iDoyaFEdlDMuUWgcW8.2UiZittOA8Npss8rCLpO35lq','temp_1791427815','https://api.dicebear.com/7.x/adventurer/svg?seed=User+Temp+Regression','active','2026-10-08 09:50:15','2026-10-08 09:50:15'),('http-tchr-0153bcf9','teacher','Guru HTTP Test','http_http-tchr-0153bcf9@test.id','hash','uname_http-tchr-0153bcf9',NULL,'active','2026-10-07 10:57:05','2026-10-07 10:57:05'),('http-tchr-1739425f','teacher','Guru HTTP Test','http_http-tchr-1739425f@test.id','hash','uname_http-tchr-1739425f',NULL,'active','2026-10-07 10:59:08','2026-10-07 10:59:08'),('http-tchr-87cd7789','teacher','Guru HTTP Test','http_http-tchr-87cd7789@test.id','hash','uname_http-tchr-87cd7789',NULL,'active','2026-10-07 10:57:24','2026-10-07 10:57:24'),('http-tchr-8d029204','teacher','Guru HTTP Test','http_http-tchr-8d029204@test.id','hash','uname_http-tchr-8d029204',NULL,'active','2026-10-07 10:58:04','2026-10-07 10:58:04'),('http-tchr-9eca934a','teacher','Guru HTTP Test','http_http-tchr-9eca934a@test.id','hash','uname_http-tchr-9eca934a',NULL,'active','2026-10-07 10:58:39','2026-10-07 10:58:39'),('http-tchr-a21192bc','teacher','Guru HTTP Test','http_http-tchr-a21192bc@test.id','hash','uname_http-tchr-a21192bc',NULL,'active','2026-10-07 10:57:42','2026-10-07 10:57:42'),('http-tchr-c2dc8d1e','teacher','Guru HTTP Test','http_http-tchr-c2dc8d1e@test.id','hash','uname_http-tchr-c2dc8d1e',NULL,'active','2026-10-07 10:56:37','2026-10-07 10:56:37'),('tchr-sse-54e216b2','teacher','Guru SSE','tchr_tchr-sse-54e216b2@test.id','hash',NULL,NULL,'active','2026-10-07 11:24:26','2026-10-07 11:24:26'),('tchr-sse-c9d445e2','teacher','Guru SSE','tchr_tchr-sse-c9d445e2@test.id','hash',NULL,NULL,'active','2026-10-07 11:25:43','2026-10-07 11:25:43'),('test-teacher-46497b6e','teacher','Guru Penguji','teacher_test-teacher-46497b6e@test.id','hash','teacher_test-teacher-46497b6e',NULL,'active','2026-10-07 10:55:05','2026-10-07 10:55:05'),('test-teacher-9289c803','teacher','Guru Test','guru_1791348434@test.com','hash','guru_1791348434',NULL,'active','2026-10-07 11:47:14','2026-10-07 11:47:14'),('test-teacher-ba286121','teacher','Guru Test','guru_1791348394@test.com','hash','guru_1791348394',NULL,'active','2026-10-07 11:46:34','2026-10-07 11:46:34');
+INSERT INTO `profiles` VALUES ('00000000-0000-0000-0000-000000000001','admin','Administrator SINESA','admin@sinesa.com','$2y$10$dtqhuVmniybTLq4AfkRKAe4V7nybmL7krtIKYht5ZVjo.gi1ow01G','admin',NULL,'active','2026-10-07 10:54:38','2026-10-08 14:29:52'),('00000000-0000-0000-0000-000000000002','teacher','Guru Pertiwi Tester','pertiwi_test@sinesa.com','$2y$10','pertiwitest',NULL,'active','2026-10-07 12:41:11','2026-10-07 12:41:11'),('00000000-0000-0000-0000-000000000003','student','Budi Santoso Terupdate','budi_test@sinesa.com','$2y$10','budi_updated_1791355562',NULL,'active','2026-10-07 12:41:11','2026-10-07 13:46:02'),('11111111-1111-1111-1111-111111111111','admin','Administrator Regression','regression_admin@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_admin',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:46'),('1ca6afb4-a4eb-4903-976b-5fe0b38bef4e','teacher','Guru Pengajar','teacher_1ca6afb4@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('2164db44-350e-4b9b-93c7-69b09b8dbb6b','teacher','Guru Pengajar','teacher_2164db44@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('22222222-2222-2222-2222-222222222222','teacher','Ibu Guru Pertiwi M.Pd','regression_teacher@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_teacher',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:47'),('26f39082-3108-41fd-8867-6e516af0e80a','teacher','Guru Pengajar','teacher_26f39082@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('29109c56-da85-4bf4-becb-a707f4e3a20b','teacher','Guru Pengajar','teacher_29109c56@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('33333333-3333-3333-3333-333333333333','student','Siswa Budi Santoso','regression_student@sinesa.com','$2y$10$PJ2DBsaKzIauJRtfj4mir.D8m33MnHsTeyDngv8.FEhSDbOfOLIG6','reg_student',NULL,'active','2026-10-08 09:48:30','2026-10-08 13:16:46'),('378c481f-76bf-4e9d-adbb-a6f7e2cc5952','student','Yudi Santosa','student_378c481f@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19','student','Murid DebugMurid Debug','student_4b7cd3e0@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('65ab83a4-be85-4565-b518-0fb783337215','student','budi','student_65ab83a4@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('da544f24-1b45-40b8-88dc-1a418ed6ae2d','teacher','Guru Pengajar','teacher_da544f24@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('e763f0fa-588e-4720-a940-91904a0048b7','teacher','Guru Pengajar','teacher_e763f0fa@sinesa.local','$2y$10$w8w2h02aM7gU1Y3v6x.C/euP0kI3Q4xPjJqB5R5g1d9u6K8p2z4O6',NULL,NULL,'active','2026-10-07 13:25:31','2026-10-07 13:25:31'),('fd86258e-bad0-4fe0-b73f-72387bf185fc','student','User Temp Regression','temp_crud_1791427815@sinesa.com','$2y$10$gzmJGR0hT5iDoyaFEdlDMuUWgcW8.2UiZittOA8Npss8rCLpO35lq','temp_1791427815','https://api.dicebear.com/7.x/adventurer/svg?seed=User+Temp+Regression','active','2026-10-08 09:50:15','2026-10-08 09:50:15'),('http-tchr-0153bcf9','teacher','Guru HTTP Test','http_http-tchr-0153bcf9@test.id','hash','uname_http-tchr-0153bcf9',NULL,'active','2026-10-07 10:57:05','2026-10-07 10:57:05'),('http-tchr-1739425f','teacher','Guru HTTP Test','http_http-tchr-1739425f@test.id','hash','uname_http-tchr-1739425f',NULL,'active','2026-10-07 10:59:08','2026-10-07 10:59:08'),('http-tchr-87cd7789','teacher','Guru HTTP Test','http_http-tchr-87cd7789@test.id','hash','uname_http-tchr-87cd7789',NULL,'active','2026-10-07 10:57:24','2026-10-07 10:57:24'),('http-tchr-8d029204','teacher','Guru HTTP Test','http_http-tchr-8d029204@test.id','hash','uname_http-tchr-8d029204',NULL,'active','2026-10-07 10:58:04','2026-10-07 10:58:04'),('http-tchr-9eca934a','teacher','Guru HTTP Test','http_http-tchr-9eca934a@test.id','hash','uname_http-tchr-9eca934a',NULL,'active','2026-10-07 10:58:39','2026-10-07 10:58:39'),('http-tchr-a21192bc','teacher','Guru HTTP Test','http_http-tchr-a21192bc@test.id','hash','uname_http-tchr-a21192bc',NULL,'active','2026-10-07 10:57:42','2026-10-07 10:57:42'),('http-tchr-c2dc8d1e','teacher','Guru HTTP Test','http_http-tchr-c2dc8d1e@test.id','hash','uname_http-tchr-c2dc8d1e',NULL,'active','2026-10-07 10:56:37','2026-10-07 10:56:37'),('tchr-sse-54e216b2','teacher','Guru SSE','tchr_tchr-sse-54e216b2@test.id','hash',NULL,NULL,'active','2026-10-07 11:24:26','2026-10-07 11:24:26'),('tchr-sse-c9d445e2','teacher','Guru SSE','tchr_tchr-sse-c9d445e2@test.id','hash',NULL,NULL,'active','2026-10-07 11:25:43','2026-10-07 11:25:43'),('test-teacher-46497b6e','teacher','Guru Penguji','teacher_test-teacher-46497b6e@test.id','hash','teacher_test-teacher-46497b6e',NULL,'active','2026-10-07 10:55:05','2026-10-07 10:55:05'),('test-teacher-9289c803','teacher','Guru Test','guru_1791348434@test.com','hash','guru_1791348434',NULL,'active','2026-10-07 11:47:14','2026-10-07 11:47:14'),('test-teacher-ba286121','teacher','Guru Test','guru_1791348394@test.com','hash','guru_1791348394',NULL,'active','2026-10-07 11:46:34','2026-10-07 11:46:34');
 /*!40000 ALTER TABLE `profiles` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -275,15 +275,15 @@ DROP TABLE IF EXISTS `questions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `questions` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `quiz_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `question_text` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `question_type` enum('multiple_choice','true_false','multiple_answer','matching') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'multiple_choice',
-  `media_type` enum('text','image','audio','video','latex') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'text',
-  `media_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quiz_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `question_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `question_type` enum('multiple_choice','true_false','multiple_answer','matching') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'multiple_choice',
+  `media_type` enum('text','image','audio','video','latex') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'text',
+  `media_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `points` int NOT NULL DEFAULT '100',
   `order_index` int NOT NULL DEFAULT '0',
-  `explanation` text COLLATE utf8mb4_unicode_ci,
+  `explanation` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_questions_quiz_id` (`quiz_id`),
@@ -310,15 +310,15 @@ DROP TABLE IF EXISTS `quiz_sessions`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `quiz_sessions` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `quiz_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `host_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `status` enum('lobby','active','completed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'lobby',
-  `current_stage` enum('waiting','countdown','question','question_result','leaderboard','finished') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'waiting',
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `quiz_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `host_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` enum('lobby','active','completed') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'lobby',
+  `current_stage` enum('waiting','countdown','question','question_result','leaderboard','finished') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'waiting',
   `current_question_index` int NOT NULL DEFAULT '-1',
   `question_started_at` datetime(3) DEFAULT NULL,
   `question_expires_at` datetime(3) DEFAULT NULL,
-  `quiz_mode` enum('serius','santai') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'serius',
+  `quiz_mode` enum('serius','santai') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'serius',
   `lives_count` int NOT NULL DEFAULT '3',
   `show_final_result` tinyint(1) NOT NULL DEFAULT '1',
   `show_leaderboard` tinyint(1) NOT NULL DEFAULT '1',
@@ -361,18 +361,18 @@ DROP TABLE IF EXISTS `quizzes`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `quizzes` (
-  `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `teacher_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `title` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `opening_text` text COLLATE utf8mb4_unicode_ci,
-  `closing_text` text COLLATE utf8mb4_unicode_ci,
-  `pin_code` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `teacher_id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `opening_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `closing_text` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `pin_code` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `duration_per_question` int NOT NULL DEFAULT '30',
   `random_questions` tinyint(1) NOT NULL DEFAULT '0',
   `random_options` tinyint(1) NOT NULL DEFAULT '0',
-  `thumbnail_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `quiz_mode` enum('serius','santai') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'serius',
+  `thumbnail_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `quiz_mode` enum('serius','santai') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'serius',
   `lives_count` int NOT NULL DEFAULT '3',
   `show_final_result` tinyint(1) NOT NULL DEFAULT '1',
   `show_leaderboard` tinyint(1) NOT NULL DEFAULT '1',
@@ -385,7 +385,7 @@ CREATE TABLE `quizzes` (
   `anti_cheat_enabled` tinyint(1) NOT NULL DEFAULT '0',
   `fullscreen_required` tinyint(1) NOT NULL DEFAULT '0',
   `auto_submit_on_violation` int NOT NULL DEFAULT '3',
-  `status` enum('active','inactive') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
+  `status` enum('active','inactive') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -415,8 +415,8 @@ DROP TABLE IF EXISTS `settings`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `settings` (
-  `key` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `value` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -473,7 +473,7 @@ SET character_set_client = @saved_cs_client;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-10-08 13:30:13
+-- Dump completed on 2026-10-08 14:30:07
 
 
 SET FOREIGN_KEY_CHECKS = 1;
