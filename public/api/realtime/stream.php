@@ -42,6 +42,9 @@ header('Content-Type: text/event-stream; charset=UTF-8');
 header('Cache-Control: no-cache, no-transform, no-store, must-revalidate');
 header('Connection: keep-alive');
 header('X-Accel-Buffering: no');
+header('X-LiteSpeed-Buffer: no');
+header('Content-Encoding: none');
+header('Pragma: no-cache');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Credentials: true');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
@@ -102,17 +105,17 @@ if (!empty($token)) {
 
 // Initial 2KB padding to defeat proxy / Apache buffer + retry instruction
 echo ":" . str_repeat(" ", 2048) . "\n\n";
-echo "retry: 1000\n\n";
+echo "retry: 500\n\n";
 if (ob_get_level() > 0) {
     @ob_flush();
 }
 @flush();
 
 // -------------------------------------------------------------------------
-// 3. STREAMING LOOP WITH 25-SECOND PROCESS LIFECYCLE
+// 3. STREAMING LOOP WITH 12-SECOND PROCESS LIFECYCLE
 // -------------------------------------------------------------------------
 $startTime = time();
-$maxDuration = 25; // Clean release of PHP-FPM process after 25s
+$maxDuration = 12; // Short cycle to avoid PHP worker exhaustion on shared hosting
 
 $lastStageSignature = null;
 $lastPartCount = -1;
@@ -327,8 +330,8 @@ while ((time() - $startTime) < $maxDuration) {
         ]);
     }
 
-    // Sleep 1 second before next tick
-    sleep(1);
+    // Sleep 700ms before next tick for fast reaction time
+    usleep(700000);
 }
 
 // Clean termination: send refresh heartbeat and close connection cleanly so PHP-FPM process dies

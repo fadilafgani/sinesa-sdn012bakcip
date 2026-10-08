@@ -34,6 +34,14 @@ export class RealtimeChannelManager {
   private processedEventIds = new Set<string>();
   private lastEventTimestamps = new Map<string, number>();
 
+  // Adaptive Polling Fallback for hosting / proxy reliability
+  private pollingInterval: any = null;
+  private lastPolledStage: string | null = null;
+  private lastPolledQuestionIdx: number | null = null;
+  private lastPolledStatus: string | null = null;
+  private lastPolledParticipantsCount: number = -1;
+  private isPollingActive: boolean = false;
+
   constructor() {}
 
   setStatusCallback(cb: (status: RealtimeStatus) => void) {
@@ -90,6 +98,7 @@ export class RealtimeChannelManager {
     this.reconnectAttempts = 0;
 
     this.connect();
+    this.startAdaptivePolling();
   }
 
   /**
@@ -113,7 +122,8 @@ export class RealtimeChannelManager {
       params.append('token', token);
     }
 
-    const url = `/api/realtime/stream?${params.toString()}`;
+    // Connect directly to stream.php to bypass potential rewrite conflicts
+    const url = `/api/realtime/stream.php?${params.toString()}`;
     logRealtime(`Opening native EventSource: ${url}`);
 
     try {
@@ -356,6 +366,8 @@ export class RealtimeChannelManager {
    * Internal resource cleanup
    */
   private cleanup() {
+    this.stopAdaptivePolling();
+
     if (this.heartbeatWatchdog) {
       clearTimeout(this.heartbeatWatchdog);
       this.heartbeatWatchdog = null;
@@ -375,6 +387,84 @@ export class RealtimeChannelManager {
 
     this.processedEventIds.clear();
     this.lastEventTimestamps.clear();
+  }
+
+  /**
+   * Adaptive background polling fallback.
+   * Guarantees stage and question state sync even if SSE is buffered or proxy-blocked by hosting.
+   */
+  private startAdaptivePolling() {
+    this.stopAdaptivePolling();
+
+    // Check state every 1500ms
+    this.pollingInterval = setInterval(async () => {
+      if (this.isExplicitDisconnect || !this.sessionId || this.isPollingActive) return;
+      this.isPollingActive = true;
+
+      try {
+        const res = await apiClient.get<any>(`/sessions?id=${encodeURIComponent(this.sessionId)}`);
+        if (res.success && res.data) {
+          const session = res.data;
+          const stageChanged = session.current_stage !== this.lastPolledStage;
+          const qIdxChanged = session.current_question_index !== this.lastPolledQuestionIdx;
+          const statusChanged = session.status !== this.lastPolledStatus;
+
+          if (stageChanged || qIdxChanged || statusChanged) {
+            this.lastPolledStage = session.current_stage;
+            this.lastPolledQuestionIdx = session.current_question_index;
+            this.lastPolledStatus = session.status;
+
+            logRealtime(`[POLL_FALLBACK] Stage/Question state sync: ${session.current_stage} (qIdx: ${session.current_question_index})`);
+
+            realtimeEvents.emit('SessionUpdated', session);
+            if (session.current_stage) {
+              realtimeEvents.emit('StageChanged', session.current_stage);
+              if (session.current_stage === 'finished') {
+                realtimeEvents.emit('QuizFinished', session);
+              }
+            }
+            if (typeof session.current_question_index === 'number') {
+              realtimeEvents.emit('QuestionChanged', session.current_question_index);
+            }
+            if (session.question_started_at || session.question_expires_at) {
+              realtimeEvents.emit('TimerUpdated', {
+                started_at: session.question_started_at,
+                expires_at: session.question_expires_at,
+              });
+            }
+          }
+
+          // In lobby, also track participants count
+          if (this.role === 'host' || session.current_stage === 'lobby' || session.status === 'lobby') {
+            const partRes = await apiClient.get<any[]>(`/participants?session_id=${encodeURIComponent(this.sessionId)}`);
+            if (partRes.success && Array.isArray(partRes.data)) {
+              if (partRes.data.length !== this.lastPolledParticipantsCount) {
+                this.lastPolledParticipantsCount = partRes.data.length;
+                partRes.data.forEach(p => {
+                  realtimeEvents.emit('ParticipantJoined', p);
+                });
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Silently tolerate transient polling error
+      } finally {
+        this.isPollingActive = false;
+      }
+    }, 1500);
+  }
+
+  private stopAdaptivePolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+    }
+    this.lastPolledStage = null;
+    this.lastPolledQuestionIdx = null;
+    this.lastPolledStatus = null;
+    this.lastPolledParticipantsCount = -1;
+    this.isPollingActive = false;
   }
 }
 
