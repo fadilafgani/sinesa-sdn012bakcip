@@ -1,6 +1,55 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  # Pass Authorization header to PHP
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+  RewriteCond %{HTTP:Authorization} ^(.*)
+  RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
+
+  # Route /api/quizzes to /api/quizzes/index.php
+  RewriteRule ^api/quizzes/?$ api/quizzes/index.php [L,QSA]
+
+  # Route /api/questions to /api/questions/index.php
+  RewriteRule ^api/questions/?$ api/questions/index.php [L,QSA]
+  RewriteRule ^api/questions/options/?$ api/questions/index.php?type=options [L,QSA]
+  # Route /api/sessions to /api/sessions/index.php
+  RewriteRule ^api/sessions/?$ api/sessions/index.php [L,QSA]
+
+  # Route /api/participants to /api/participants/index.php
+  RewriteRule ^api/participants/?$ api/participants/index.php [L,QSA]
+
+  # Route /api/answers/submit to /api/answers/submit.php
+  RewriteRule ^api/answers/submit/?$ api/answers/submit.php [L,QSA]
+
+  # Route /api/answers to /api/answers/index.php
+  RewriteRule ^api/answers/?$ api/answers/index.php [L,QSA]
+
+  # Route /api/realtime/stream to /api/realtime/stream.php
+  RewriteRule ^api/realtime/stream/?$ api/realtime/stream.php [L,QSA]
+
+  # Route /api/admin/users to /api/admin/users.php
+  RewriteRule ^api/admin/users/?$ api/admin/users.php [L,QSA]
+
+  # Route /api/admin/stats to /api/admin/stats.php
+  RewriteRule ^api/admin/stats/?$ api/admin/stats.php [L,QSA]
+
+  # Route /api/settings to /api/settings.php
+  RewriteRule ^api/settings/?$ api/settings.php [L,QSA]
+
+  # Route /api/profile to /api/profile.php
+  RewriteRule ^api/profile/?$ api/profile.php [L,QSA]
+
+  # Route /api/leaderboard to /api/leaderboard.php
+  RewriteRule ^api/leaderboard/?$ api/leaderboard.php [L,QSA]
+
+  # Allow extensionless API endpoints (/api/auth/login -> /api/auth/login.php)
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteCond %{DOCUMENT_ROOT}/$1.php -f [OR]
+  RewriteCond %{REQUEST_FILENAME}\.php -f
+  RewriteRule ^(.*)$ $1.php [L]
+
+  # SPA client fallback
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d

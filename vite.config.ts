@@ -24,9 +24,6 @@ export default defineConfig({
             if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
               return 'react-core';
             }
-            if (id.includes('@supabase')) {
-              return 'supabase';
-            }
             if (id.includes('framer-motion')) {
               return 'framer-motion';
             }
@@ -45,6 +42,19 @@ export default defineConfig({
             return 'vendor';
           }
         }
+      }
+    }
+  },
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://evaluasi-bakcip.test',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://evaluasi-bakcip.test',
+        changeOrigin: true,
       }
     }
   }

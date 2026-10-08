@@ -22,6 +22,7 @@ import confetti from 'canvas-confetti';
 import { showConfirm, showError } from '@/shared/utils/swal';
 import { QuestionService } from '@/features/question/services/question.service';
 import type { Option, Participant } from '@/types';
+import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import { LazyImage } from '@/shared/components/lazy-image';
 import { getSafeMediaUrl } from '@/shared/utils/media';
 
@@ -118,6 +119,13 @@ export const PlaySession: React.FC = () => {
   });
 
   // Component render and useEffect loggers for pembuktian debugging
+  console.log('COMPONENT_RENDER', 'PlaySession', {
+    stage: session?.current_stage,
+    status: session?.status,
+    qIndex: currentQuestionIndex,
+    hasAnswered,
+    hasCurrentQuestion: !!currentQuestion
+  });
   console.log('PLAY_SESSION_RENDER', session?.current_stage);
   console.log('RE_RENDER', session?.current_stage);
 
@@ -261,13 +269,23 @@ export const PlaySession: React.FC = () => {
     }
   }, [currentQuestion?.id, hasAnswered, quiz?.show_question_statistics]);
 
+  // Realtime Live Leaderboard Sync from Store
+  const liveStoreLeaderboard = useLeaderboardStore(state => state.leaderboard);
+  useEffect(() => {
+    if (liveStoreLeaderboard && liveStoreLeaderboard.length > 0) {
+      setLeaderboard(liveStoreLeaderboard);
+    }
+  }, [liveStoreLeaderboard]);
+
   // Fetch leaderboard when kuis is completed
   useEffect(() => {
     if ((isCompleted || session?.status === 'completed' || session?.current_stage === 'finished') && quiz?.show_leaderboard && quiz?.show_final_result) {
       setLoadingLeaderboard(true);
       fetchLeaderboard()
         .then((res: any) => {
-          setLeaderboard(res);
+          if (res && res.length > 0) {
+            setLeaderboard(res);
+          }
         })
         .catch((err: any) => {
           console.error('Error fetching leaderboard:', err);

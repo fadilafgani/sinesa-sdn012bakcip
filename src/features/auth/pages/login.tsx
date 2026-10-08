@@ -172,7 +172,7 @@ export const Login: React.FC = () => {
       return;
     }
 
-    // Supabase Online Auth Flow
+    // Online Auth Flow
     try {
       if (isSignUp) {
         const signUpRes = await AuthService.signUp(email, password, role, fullName);
@@ -181,7 +181,7 @@ export const Login: React.FC = () => {
 
         if (data.user) {
           if (data.session) {
-            // Email confirmations are disabled in Supabase, meaning they are logged in immediately
+            // Pengguna langsung terautentikasi dan sesi aktif
             setSuccessMessage('Registrasi berhasil! Mengalihkan ke dashboard...');
             // Let the useEffect handle the redirection or navigate manually
             const userRole = role || 'student';

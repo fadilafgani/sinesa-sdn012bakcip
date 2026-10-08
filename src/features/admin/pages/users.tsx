@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
-import { supabase } from '@/core/supabase';
+import { AdminService } from '@/features/admin/services/admin.service';
 import type { Profile, UserRole } from '@/types';
 import { Search, Trash2, UserPlus, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -47,13 +47,11 @@ export const UsersCrud: React.FC = () => {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!error && data) {
-        setProfiles(data as Profile[]);
+      const res = await AdminService.getUsers();
+      if (res.success && res.data) {
+        setProfiles(res.data);
+      } else {
+        showError('Gagal', res.error?.message || 'Gagal memuat daftar pengguna.');
       }
     } catch (err) {
       console.error('Error fetching profiles:', err);
@@ -75,16 +73,16 @@ export const UsersCrud: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role })
-        .eq('id', userId);
-
-      if (!error) {
+      const res = await AdminService.updateUser(userId, { role });
+      if (res.success) {
         setProfiles(profiles.map(p => p.id === userId ? { ...p, role } : p));
+        showSuccess('Berhasil', 'Peran pengguna berhasil diubah.');
+      } else {
+        showError('Gagal', res.error?.message || 'Gagal mengubah peran pengguna.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error changing role:', err);
+      showError('Gagal', err.message || 'Gagal mengubah peran.');
     }
   };
 
@@ -110,16 +108,12 @@ export const UsersCrud: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userId);
-
-      if (!error) {
+      const res = await AdminService.deleteUser(userId);
+      if (res.success) {
         setProfiles(profiles.filter(p => p.id !== userId));
         showSuccess('Berhasil', 'Pengguna telah dihapus secara permanen.');
       } else {
-        showError('Gagal', `Gagal menghapus pengguna: ${error.message}`);
+        showError('Gagal', res.error?.message || 'Gagal menghapus pengguna.');
       }
     } catch (err: any) {
       console.error('Error deleting profile:', err);
@@ -127,19 +121,44 @@ export const UsersCrud: React.FC = () => {
     }
   };
 
-  const handleCreateMockUser = (e: React.FormEvent) => {
+  const handleCreateMockUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFullName || !newEmail) return;
 
-    const mockProfiles = JSON.parse(localStorage.getItem('mock_profiles') || '[]');
-    mockProfiles.push({ email: newEmail, role: newRole, fullName: newFullName });
-    localStorage.setItem('mock_profiles', JSON.stringify(mockProfiles));
+    if (isMock) {
+      const mockProfiles = JSON.parse(localStorage.getItem('mock_profiles') || '[]');
+      mockProfiles.push({ email: newEmail, role: newRole, fullName: newFullName });
+      localStorage.setItem('mock_profiles', JSON.stringify(mockProfiles));
 
-    setNewFullName('');
-    setNewEmail('');
-    setNewRole('student');
-    setShowAddForm(false);
-    fetchProfiles();
+      setNewFullName('');
+      setNewEmail('');
+      setNewRole('student');
+      setShowAddForm(false);
+      fetchProfiles();
+      return;
+    }
+
+    try {
+      const res = await AdminService.createUser({
+        full_name: newFullName,
+        email: newEmail,
+        password: 'password123',
+        role: newRole,
+      });
+
+      if (res.success && res.data) {
+        setProfiles([res.data, ...profiles]);
+        showSuccess('Berhasil', `Pengguna "${newFullName}" berhasil didaftarkan! Kata sandi bawaan: password123`);
+        setNewFullName('');
+        setNewEmail('');
+        setNewRole('student');
+        setShowAddForm(false);
+      } else {
+        showError('Gagal', res.error?.message || 'Gagal menambahkan pengguna baru.');
+      }
+    } catch (err: any) {
+      showError('Gagal', err.message || 'Terjadi kesalahan sistem.');
+    }
   };
 
   const handleLogout = async () => {

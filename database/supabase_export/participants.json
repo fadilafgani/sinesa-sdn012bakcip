@@ -1,0 +1,265 @@
+[
+    {
+        "id": "a4211f60-2e77-4149-8798-21cfba08114f",
+        "session_id": "67093669-e39a-4814-b415-dcf4841aba44",
+        "student_id": "4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19",
+        "display_name": "Murid DebugMurid Debug",
+        "score": 0,
+        "joined_at": "2026-07-14T04:35:19.574466+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "e9a19185-0579-4c73-bb04-9f469d6bdb09",
+        "session_id": "a04c177a-f178-438e-a168-9e4b27ae703a",
+        "student_id": "4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19",
+        "display_name": "Murid DebugMurid Debug",
+        "score": 100,
+        "joined_at": "2026-07-14T04:41:04.619078+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "4a6eb137-e036-4067-b28c-3f0cfd53273a": "answered",
+            "88ebb3ca-10e9-4d4a-b49d-2c48d0058c82": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "af4e91e3-b0a2-4fed-a3f8-9a0b3def7a89",
+        "session_id": "7ab75f2b-7f9c-4252-9bde-c5660feb2c22",
+        "student_id": "378c481f-76bf-4e9d-adbb-a6f7e2cc5952",
+        "display_name": "Yudi Santosa",
+        "score": 200,
+        "joined_at": "2026-07-14T14:18:20.351913+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "68035d69-f404-4bc3-8a01-8859531b2c3c": "answered",
+            "75517dcf-3626-4d83-97ee-7f0bcd292bd9": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "30ace098-d0c9-41a3-949b-3ca0dc1d3a06",
+        "session_id": "f538c163-736c-4bcf-87fe-43f15a8b65e9",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 0,
+        "joined_at": "2026-05-24T03:48:01.088661+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "479b20a6-49be-4a34-b84a-10d8422f196f",
+        "session_id": "a04c177a-f178-438e-a168-9e4b27ae703a",
+        "student_id": "4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19",
+        "display_name": "Murid Debug",
+        "score": 0,
+        "joined_at": "2026-07-14T04:45:26.052362+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "4f5f86bc-9efa-406d-b87c-c0585dade376",
+        "session_id": "d2571289-337f-4e84-9230-a7df4364bb3e",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 200,
+        "joined_at": "2026-07-14T14:54:03.977681+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "68035d69-f404-4bc3-8a01-8859531b2c3c": "answered",
+            "75517dcf-3626-4d83-97ee-7f0bcd292bd9": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "6c9c97e7-7415-4db9-b3f6-78fe1cc62c67",
+        "session_id": "f538c163-736c-4bcf-87fe-43f15a8b65e9",
+        "student_id": null,
+        "display_name": "Test Realtime 8038",
+        "score": 0,
+        "joined_at": "2026-07-07T13:19:34.698446+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "7a86f8e3-f0f3-4281-89ed-a15b6e089b3c",
+        "session_id": "72b5862f-3e4a-433b-ac07-54e46673f209",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 100,
+        "joined_at": "2026-07-14T15:03:07.103052+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "68035d69-f404-4bc3-8a01-8859531b2c3c": "answered",
+            "75517dcf-3626-4d83-97ee-7f0bcd292bd9": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "bb864144-6156-47c4-9b19-955992a4395e",
+        "session_id": "81706b91-b6d7-4166-9fa6-4e347e24c46f",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 100,
+        "joined_at": "2026-07-14T15:05:33.692592+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "177b1dc4-1465-4a61-8cfa-482166c35954": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 1
+    },
+    {
+        "id": "00000000-0000-4000-8000-361438623273",
+        "session_id": "f538c163-736c-4bcf-87fe-43f15a8b65e9",
+        "student_id": null,
+        "display_name": "TestAnonStudent",
+        "score": 0,
+        "joined_at": "2026-06-29T02:40:38.699504+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 1,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "2d1fc7c2-8b60-4444-9cda-f074c13be6dc",
+        "session_id": "0bb54e2f-94ee-4279-8f19-b08cdb6ab82e",
+        "student_id": "378c481f-76bf-4e9d-adbb-a6f7e2cc5952",
+        "display_name": "Yudi Santosa",
+        "score": 0,
+        "joined_at": "2026-07-14T06:09:20.411105+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "cab09b67-03e1-41d6-ba0d-de81bd2f12a5",
+        "session_id": "ff5cb14a-a814-4efb-b987-164e2200315a",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 200,
+        "joined_at": "2026-07-14T15:10:28.463222+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "639a3739-9c21-41a1-b844-fd9c1f72e8d7": "answered",
+            "d94464b2-4abc-4354-9b10-ff3380eb85b7": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 1
+    },
+    {
+        "id": "f7950d8f-a476-411f-992d-6002dc0208fa",
+        "session_id": "876a201b-f7b3-46a6-bd1a-6d411bc9a0bc",
+        "student_id": "4b7cd3e0-bf17-4655-8bcb-ec4117f7bd19",
+        "display_name": "Murid DebugMurid Debug",
+        "score": 0,
+        "joined_at": "2026-07-13T07:59:37.875495+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "7acfb52d-5895-4219-858a-740d95b5edf7": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "1368289c-bb70-417b-bf78-0af6ec588134",
+        "session_id": "25e15a48-84fa-4261-89ac-7c8e6c7943ed",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 0,
+        "joined_at": "2026-07-14T06:57:06.552816+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "a83467f4-a846-442f-9422-f1a42d68bbc6",
+        "session_id": "25e15a48-84fa-4261-89ac-7c8e6c7943ed",
+        "student_id": "378c481f-76bf-4e9d-adbb-a6f7e2cc5952",
+        "display_name": "Yudi Santosa",
+        "score": 100,
+        "joined_at": "2026-07-14T06:59:27.298256+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "68035d69-f404-4bc3-8a01-8859531b2c3c": "answered",
+            "75517dcf-3626-4d83-97ee-7f0bcd292bd9": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "766e12c8-a957-4921-a374-7f92c8325370",
+        "session_id": "2c7418b6-985f-465c-8bb9-e0d17022a7c1",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budibudi",
+        "score": 100,
+        "joined_at": "2026-07-14T13:54:11.239234+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": {
+            "68035d69-f404-4bc3-8a01-8859531b2c3c": "answered",
+            "75517dcf-3626-4d83-97ee-7f0bcd292bd9": "answered"
+        },
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    },
+    {
+        "id": "898c5039-0b4c-4b28-a003-7960501fe4d9",
+        "session_id": "7ab75f2b-7f9c-4252-9bde-c5660feb2c22",
+        "student_id": "65ab83a4-be85-4565-b518-0fb783337215",
+        "display_name": "budi",
+        "score": 0,
+        "joined_at": "2026-07-14T14:15:21.205511+00:00",
+        "lives": 3,
+        "skipped_questions": [],
+        "question_status": [],
+        "current_progress": 0,
+        "is_completed": false,
+        "violation_count": 0
+    }
+]

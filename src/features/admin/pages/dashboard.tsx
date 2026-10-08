@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
-import { supabase } from '@/core/supabase';
-import { createClient } from '@supabase/supabase-js';
+import { AdminService } from '@/features/admin/services/admin.service';
+import { QuizService } from '@/features/quiz/services/quiz.service';
+import { SessionService } from '@/features/session/services/session.service';
 import type { Profile, UserRole, Quiz, QuizSession, ActivityLog, UserSession, Notification } from '@/types';
 import { 
   LayoutDashboard, 
@@ -53,7 +54,12 @@ export const AdminDashboard: React.FC = () => {
     app_name: 'SINESA',
     app_logo: 'https://api.dicebear.com/7.x/shapes/svg?seed=sinesa',
     theme_color: 'blue',
+    school_name: 'SDN 012 Babakan Ciparay',
+    school_npsn: '20219584',
+    school_address: 'Jl. Babakan Ciparay No. 12, Bandung',
     registration_enabled: 'true',
+    allow_student_registration: 'true',
+    allow_guest_participants: 'true',
     default_anti_cheat_enabled: 'false',
     default_leaderboard_enabled: 'true',
     default_show_final_result: 'true',
@@ -261,44 +267,39 @@ export const AdminDashboard: React.FC = () => {
 
       setLoading(false);
     } else {
-      // Supabase flow
+      // PHP REST API flow
       try {
         // Fetch profiles
-        const { data: profData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-        if (profData) setProfiles(profData as Profile[]);
+        const profRes = await AdminService.getUsers();
+        if (profRes.success && profRes.data) setProfiles(profRes.data);
 
         // Fetch quizzes
-        const { data: quizData } = await supabase.from('quizzes').select('*').order('created_at', { ascending: false });
-        if (quizData) setQuizzes(quizData as Quiz[]);
+        const quizRes = await QuizService.getAllQuizzes();
+        if (quizRes.success && quizRes.data) setQuizzes(quizRes.data);
 
         // Fetch sessions
-        const { data: sessData } = await supabase.from('quiz_sessions').select('*').order('created_at', { ascending: false });
-        if (sessData) setSessions(sessData as QuizSession[]);
+        const sessRes = await SessionService.getAllSessions();
+        if (sessRes.success && sessRes.data) setSessions(sessRes.data);
 
-        // Fetch logs
-        const { data: logData } = await supabase.from('activity_logs').select('*').order('created_at', { ascending: false });
-        if (logData) setLogs(logData as ActivityLog[]);
-
-        // Fetch system settings
-        const { data: settsData } = await supabase.from('system_settings').select('*');
-        if (settsData && settsData.length > 0) {
-          const map: Record<string, string> = {};
-          settsData.forEach((s: any) => {
-            map[s.key] = s.value;
-          });
-          setSettings(prev => ({ ...prev, ...map }));
+        // Fetch stats & telemetry (includes recent activity logs)
+        const statsRes = await AdminService.getStats();
+        if (statsRes.success && statsRes.data) {
+          if (statsRes.data.recent_logs) {
+            setLogs(statsRes.data.recent_logs);
+          }
         }
 
-        // Fetch notifications
-        const { data: notifData } = await supabase.from('notifications').select('*').order('created_at', { ascending: false });
-        if (notifData) setNotifications(notifData as Notification[]);
+        // Fetch system settings
+        const settsRes = await AdminService.getSettings();
+        if (settsRes.success && settsRes.data) {
+          setSettings(prev => ({ ...prev, ...settsRes.data }));
+        }
 
-        // Fetch user sessions
-        const { data: usData } = await supabase.from('user_sessions').select('*').order('last_activity_at', { ascending: false });
-        if (usData) setUserSessions(usData as UserSession[]);
+        // User sessions fallback
+        setUserSessions([]);
 
       } catch (err) {
-        console.error('Failed to load Supabase admin data:', err);
+        console.error('Failed to load PHP admin data:', err);
       } finally {
         setLoading(false);
       }
@@ -369,38 +370,24 @@ export const AdminDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [isMock, loading]);
 
-  // Supabase realtime channel integration
+  // Periodic polling for online dashboard logs & sessions (every 10s)
   useEffect(() => {
     if (isMock || loading) return;
 
-    // Subscriptions channels
-    const logChannel = supabase.channel('admin-logs-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity_logs' }, (payload) => {
-        setLogs(prev => [payload.new as ActivityLog, ...prev]);
-      })
-      .subscribe();
+    const interval = setInterval(async () => {
+      try {
+        const statsRes = await AdminService.getStats();
+        if (statsRes.success && statsRes.data?.recent_logs) {
+          setLogs(statsRes.data.recent_logs);
+        }
+        const sessRes = await SessionService.getAllSessions();
+        if (sessRes.success && sessRes.data) {
+          setSessions(sessRes.data);
+        }
+      } catch (_) {}
+    }, 10000);
 
-    const notifChannel = supabase.channel('admin-notifs-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload) => {
-        setNotifications(prev => [payload.new as Notification, ...prev]);
-      })
-      .subscribe();
-
-    const sessionChannel = supabase.channel('admin-sessions-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_sessions' }, () => {
-        // Reload sessions
-        supabase.from('quiz_sessions').select('*').order('created_at', { ascending: false })
-          .then(({ data }) => {
-            if (data) setSessions(data as QuizSession[]);
-          });
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(logChannel);
-      supabase.removeChannel(notifChannel);
-      supabase.removeChannel(sessionChannel);
-    };
+    return () => clearInterval(interval);
   }, [isMock, loading]);
 
   // Log Out admin
@@ -419,14 +406,6 @@ export const AdminDashboard: React.FC = () => {
       };
       const savedLogs = JSON.parse(localStorage.getItem('mock_activity_logs') || '[]');
       localStorage.setItem('mock_activity_logs', JSON.stringify([newLog, ...savedLogs].slice(0, 100)));
-    } else {
-      if (adminProfile?.id) {
-        supabase.from('activity_logs').insert({
-          user_id: adminProfile.id,
-          action: 'LOGOUT',
-          details: 'Administrator logout dari panel.'
-        }).then(() => {}); // ponytail: fire and forget to avoid blocking signout on network issues
-      }
     }
 
     await signOut();
@@ -449,10 +428,6 @@ export const AdminDashboard: React.FC = () => {
       setLogs(prev => [mockLog, ...prev]);
       const savedLogs = JSON.parse(localStorage.getItem('mock_activity_logs') || '[]');
       localStorage.setItem('mock_activity_logs', JSON.stringify([mockLog, ...savedLogs].slice(0, 100)));
-    } else {
-      try {
-        await supabase.from('activity_logs').insert(newLog);
-      } catch(e){}
     }
   };
 
@@ -571,76 +546,43 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
-    // Supabase Online CRUD logic (RPC or direct signup if permitted)
+    // PHP REST API Online CRUD logic
     try {
       if (selectedUser) {
-        // Edit profile details (including email directly to profiles table)
-        const { error } = await supabase
-          .from('profiles')
-          .update({
-            full_name: userForm.fullName,
-            username: userForm.username,
-            role: userForm.role,
-            status: userForm.status,
-            email: userForm.email,
-            avatar_url: userForm.avatarUrl || null
-          })
-          .eq('id', selectedUser.id);
-        
-        if (error) throw error;
-        setProfiles(profiles.map(p => p.id === selectedUser.id ? { ...p, full_name: userForm.fullName, username: userForm.username, role: userForm.role, status: userForm.status, email: userForm.email, avatar_url: userForm.avatarUrl || p.avatar_url } : p));
-        createLog('EDIT_USER', `Mengedit profil pengguna online: ${userForm.fullName} (${selectedUser.id})`);
-        showSuccess('Berhasil', 'Data pengguna online diperbarui!');
-      } else {
-        // In online flow, we sign up the user through a temporary Supabase client to avoid logging out the current admin
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
-        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy';
-        const tempClient = createClient(supabaseUrl, supabaseAnonKey, {
-          auth: { persistSession: false }
-        });
-
-        // 1. Sign up the user
-        const { data: signUpData, error: signUpErr } = await tempClient.auth.signUp({
-          email: userForm.email,
-          password: userForm.password,
-          options: {
-            data: {
-              role: userForm.role,
-              full_name: userForm.fullName,
-            }
-          }
-        });
-
-        if (signUpErr) throw signUpErr;
-        if (!signUpData.user) throw new Error('Gagal membuat user di auth database.');
-
-        // 2. Upsert profile (to bypass the FK constraint and insert status, username, etc.)
-        const newUid = signUpData.user.id;
-        const { error: profErr } = await supabase
-          .from('profiles')
-          .upsert({
-            id: newUid,
-            full_name: userForm.fullName,
-            username: userForm.username,
-            role: userForm.role,
-            status: userForm.status,
-            email: userForm.email,
-            avatar_url: userForm.avatarUrl || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`
-          });
-        
-        if (profErr) throw profErr;
-
-        setProfiles(prev => [{
-          id: newUid,
+        // Edit profile details
+        const res = await AdminService.updateUser(selectedUser.id, {
           full_name: userForm.fullName,
           username: userForm.username,
           role: userForm.role,
           status: userForm.status,
           email: userForm.email,
-          avatar_url: userForm.avatarUrl || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(userForm.fullName)}`,
-          created_at: new Date().toISOString()
-        }, ...prev]);
+          avatar_url: userForm.avatarUrl || undefined
+        });
 
+        if (!res.success || !res.data) {
+          throw new Error(res.error?.message || 'Gagal memperbarui pengguna');
+        }
+
+        setProfiles(profiles.map(p => p.id === selectedUser.id ? res.data! : p));
+        createLog('EDIT_USER', `Mengedit profil pengguna online: ${userForm.fullName} (${selectedUser.id})`);
+        showSuccess('Berhasil', 'Data pengguna online diperbarui!');
+      } else {
+        // Create new user directly via PHP REST API
+        const res = await AdminService.createUser({
+          full_name: userForm.fullName,
+          email: userForm.email,
+          password: userForm.password,
+          username: userForm.username || undefined,
+          role: userForm.role,
+          status: userForm.status,
+          avatar_url: userForm.avatarUrl || undefined
+        });
+
+        if (!res.success || !res.data) {
+          throw new Error(res.error?.message || 'Gagal menambahkan pengguna');
+        }
+
+        setProfiles(prev => [res.data!, ...prev]);
         createLog('ADD_USER', `Menambahkan pengguna online baru: ${userForm.fullName} (${userForm.role})`);
         showSuccess('Berhasil', 'Pengguna online baru berhasil ditambahkan!');
       }
@@ -680,8 +622,8 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.from('profiles').delete().eq('id', userId);
-      if (error) throw error;
+      const res = await AdminService.deleteUser(userId);
+      if (!res.success) throw new Error(res.error?.message || 'Gagal menghapus pengguna');
       setProfiles(profiles.filter(p => p.id !== userId));
       createLog('DELETE_USER', `Menghapus pengguna online: ${name} (${userId})`);
       showSuccess('Berhasil', 'Pengguna online berhasil dihapus dari database!');
@@ -703,11 +645,12 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      // Supabase Password Reset (invoking admin auth API if allowed, or alerting client)
-      // Since normal clients cannot update other users auth password directly without custom security functions or RPC:
-      // We will mock/sim or log, and display guidance to use Supabase panel
-      showSuccess('Instruksi Dikirim', `Permintaan reset password online untuk "${selectedUser.full_name}" dicatat. Hubungi admin database jika link reset dibutuhkan.`);
-      createLog('RESET_PASSWORD', `Meminta reset password online untuk: ${selectedUser.full_name} (${selectedUser.id})`);
+      const res = await AdminService.updateUser(selectedUser.id, {
+        password: resetPasswordValue
+      });
+      if (!res.success) throw new Error(res.error?.message || 'Gagal mereset password');
+      showSuccess('Berhasil', `Password "${selectedUser.full_name}" berhasil direset ulang.`);
+      createLog('RESET_PASSWORD', `Mereset password online untuk: ${selectedUser.full_name} (${selectedUser.id})`);
       setShowResetPasswordModal(false);
       setResetPasswordValue('');
     } catch(err: any) {
@@ -741,8 +684,8 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', user.id);
-      if (error) throw error;
+      const res = await AdminService.updateUser(user.id, { status: newStatus });
+      if (!res.success) throw new Error(res.error?.message || 'Gagal mengubah status');
       setProfiles(profiles.map(p => p.id === user.id ? { ...p, status: newStatus } : p));
       createLog('TOGGLE_STATUS', `Mengubah status akun online "${user.full_name}" menjadi: ${newStatus}`);
       showSuccess('Berhasil', `Status akun online diubah menjadi: ${newStatus === 'active' ? 'Aktif' : 'Nonaktif'}`);
@@ -765,8 +708,8 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.from('quizzes').update({ status: newStatus }).eq('id', quiz.id);
-      if (error) throw error;
+      const res = await QuizService.updateQuiz(quiz.id, { status: newStatus });
+      if (!res.success) throw res.error;
       setQuizzes(quizzes.map(q => q.id === quiz.id ? { ...q, status: newStatus } : q));
       createLog('TOGGLE_QUIZ_STATUS', `Mengubah status kuis online "${quiz.title}" menjadi: ${newStatus}`);
       showSuccess('Berhasil', `Kuis online diubah menjadi: ${newStatus === 'active' ? 'Aktif' : 'Nonaktif'}`);
@@ -789,8 +732,8 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      const { error } = await supabase.from('quizzes').delete().eq('id', quiz.id);
-      if (error) throw error;
+      const res = await QuizService.deleteQuiz(quiz.id);
+      if (!res.success) throw res.error;
       setQuizzes(quizzes.filter(q => q.id !== quiz.id));
       createLog('DELETE_QUIZ', `Menghapus kuis online: ${quiz.title} (${quiz.id})`);
       showSuccess('Berhasil', 'Kuis online berhasil dihapus dari database.');
@@ -810,15 +753,8 @@ export const AdminDashboard: React.FC = () => {
     }
 
     try {
-      // Save settings to system_settings table
-      const rows = Object.entries(settings).map(([key, value]) => ({
-        key,
-        value,
-        updated_at: new Date().toISOString()
-      }));
-
-      const { error } = await supabase.from('system_settings').upsert(rows);
-      if (error) throw error;
+      const res = await AdminService.updateSettings(settings);
+      if (!res.success) throw new Error(res.error?.message || 'Gagal menyimpan pengaturan');
       createLog('SAVE_SETTINGS', 'Menyimpan konfigurasi pengaturan sistem global online.');
       showSuccess('Berhasil', 'Pengaturan sistem berhasil disimpan online!');
     } catch(err: any) {
@@ -866,8 +802,6 @@ export const AdminDashboard: React.FC = () => {
     if (isMock) {
       const saved = JSON.parse(localStorage.getItem('mock_notifications') || '[]');
       localStorage.setItem('mock_notifications', JSON.stringify(saved.filter((n: any) => n.id !== id)));
-    } else {
-      supabase.from('notifications').delete().eq('id', id).then(() => {});
     }
   };
 
@@ -1764,7 +1698,113 @@ export const AdminDashboard: React.FC = () => {
                 {/* ==================== TAB: PENGATURAN SISTEM ==================== */}
                 {activeTab === 'settings' && (
                   <form onSubmit={handleSaveSettings} className="space-y-8 max-w-2xl text-left">
-                    {/* General Settings */}
+                    {/* 1. School Settings */}
+                    <div className="glass-panel p-6 rounded-3xl border bg-card/10 space-y-6">
+                      <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border/50 pb-2">
+                        Pengaturan Identitas Sekolah (School Settings)
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Nama Sekolah</label>
+                          <input 
+                            type="text"
+                            value={settings.school_name || ''}
+                            onChange={(e) => setSettings({ ...settings, school_name: e.target.value })}
+                            placeholder="Contoh: SDN 012 Babakan Ciparay"
+                            className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">NPSN (Nomor Pokok Sekolah)</label>
+                          <input 
+                            type="text"
+                            value={settings.school_npsn || ''}
+                            onChange={(e) => setSettings({ ...settings, school_npsn: e.target.value })}
+                            placeholder="Contoh: 20219584"
+                            className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Alamat Sekolah</label>
+                        <input 
+                          type="text"
+                          value={settings.school_address || ''}
+                          onChange={(e) => setSettings({ ...settings, school_address: e.target.value })}
+                          placeholder="Contoh: Jl. Babakan Ciparay No. 12, Kota Bandung"
+                          className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
+                        />
+                      </div>
+                    </div>
+
+                    {/* 2. Registration & Access Settings */}
+                    <div className="glass-panel p-6 rounded-3xl border bg-card/10 space-y-6">
+                      <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border/50 pb-2">
+                        Pengaturan Pendaftaran & Akses (Registration Settings)
+                      </h3>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">Pendaftaran Mandiri Siswa</label>
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, registration_enabled: 'true', allow_student_registration: 'true' })}
+                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
+                                settings.registration_enabled === 'true' 
+                                  ? 'border-primary bg-primary/10 text-primary' 
+                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              Terbuka
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, registration_enabled: 'false', allow_student_registration: 'false' })}
+                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
+                                settings.registration_enabled === 'false' 
+                                  ? 'border-red-500/50 bg-red-500/10 text-red-500' 
+                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              Ditutup
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">Peserta Tamu / Mode Tamu</label>
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, allow_guest_participants: 'true' })}
+                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
+                                settings.allow_guest_participants === 'true' 
+                                  ? 'border-primary bg-primary/10 text-primary' 
+                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              Diizinkan
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setSettings({ ...settings, allow_guest_participants: 'false' })}
+                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
+                                settings.allow_guest_participants === 'false' 
+                                  ? 'border-red-500/50 bg-red-500/10 text-red-500' 
+                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              Dilarang
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Appearance & Application Settings */}
                     <div className="glass-panel p-6 rounded-3xl border bg-card/10 space-y-6">
                       <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border/50 pb-2">
                         Pengaturan Tampilan & Aplikasi
@@ -1803,33 +1843,6 @@ export const AdminDashboard: React.FC = () => {
                             <option value="yellow">Kuning Neon</option>
                             <option value="emerald">Hijau Emerald</option>
                           </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">Pendaftaran Mandiri (Registrasi)</label>
-                          <div className="flex gap-4">
-                            <button
-                              type="button"
-                              onClick={() => setSettings({ ...settings, registration_enabled: 'true' })}
-                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
-                                settings.registration_enabled === 'true' 
-                                  ? 'border-primary bg-primary/10 text-primary' 
-                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
-                              }`}
-                            >
-                              Aktif (Daftar Terbuka)
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setSettings({ ...settings, registration_enabled: 'false' })}
-                              className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
-                                settings.registration_enabled === 'false' 
-                                  ? 'border-red-500/50 bg-red-500/10 text-red-500' 
-                                  : 'border-border bg-background text-muted-foreground hover:bg-muted'
-                              }`}
-                            >
-                              Nonaktifkan
-                            </button>
-                          </div>
                         </div>
                       </div>
                     </div>

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { AuthService } from '../services/auth.service';
-import { supabase } from '@/core/supabase';
+import { apiClient } from '@/core/api-client';
 import type { Profile, UserRole } from '@/types';
 import { AnalyticsService } from '@/shared/services/analytics.service';
 
@@ -12,14 +12,16 @@ interface AuthState {
   initialize: () => Promise<void>;
   signOut: () => Promise<void>;
   setProfile: (profile: Profile | null) => void;
+  setUserAndProfile: (user: any | null, profile: Profile | null) => void;
   // Mock mode auth helper
   loginMock: (email: string, role: UserRole, fullName: string) => void;
 }
 
-// Check if we are running in mock mode due to unset environment variables
+// Check if we are running in mock mode
 export const checkIsMock = () => {
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  return !url || url.includes('your-project') || url.includes('placeholder');
+  if (import.meta.env.VITE_USE_MOCK === 'true') return true;
+  if (import.meta.env.VITE_USE_MOCK === 'false') return false;
+  return false;
 };
 
 // Preset mock profiles
@@ -38,7 +40,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialize: async () => {
     set({ loading: true });
     const isMock = checkIsMock();
-    
+
     if (isMock) {
       // Mock mode initialization
       const savedMockUser = localStorage.getItem('sinesa_mock_user');
@@ -56,48 +58,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return;
     }
 
-    try {
-      // Supabase initialization via AuthService
-      const sessionRes = await AuthService.getSession();
-      const session = sessionRes.data?.session;
-      
-      if (session?.user) {
-        const profileRes = await AuthService.getOrCreateProfile(session.user);
-        const profile = profileRes.success ? profileRes.data : null;
+    // Register session expiration callback
+    apiClient.onSessionExpired(() => {
+      console.warn('[AUTH] Active session expired, clearing store state');
+      set({ user: null, profile: null });
+      AnalyticsService.trackEvent('logout');
+    });
 
+    try {
+      // Session recovery via PHP JWT & HttpOnly refresh token cookie
+      const sessionRes = await AuthService.getSession();
+
+      if (sessionRes.success && sessionRes.data?.user) {
+        const { user, profile } = sessionRes.data;
         set({
-          user: session.user,
-          profile,
+          user,
+          profile: profile || null,
+          isMock: false,
           loading: false,
         });
       } else {
-        set({ user: null, profile: null, loading: false });
+        set({ user: null, profile: null, isMock: false, loading: false });
       }
-
-      // Listen for auth changes
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        if (session?.user) {
-          const profileRes = await AuthService.getOrCreateProfile(session.user);
-          const profile = profileRes.success ? profileRes.data : null;
-
-          set({
-            user: session.user,
-            profile,
-          });
-          if (event === 'SIGNED_IN') {
-            AnalyticsService.trackEvent('login', { email: session.user.email, role: profile?.role });
-          }
-        } else {
-          set({ user: null, profile: null });
-          if (event === 'SIGNED_OUT') {
-            AnalyticsService.trackEvent('logout');
-          }
-        }
-      });
-
     } catch (error) {
       console.error('Error initializing auth:', error);
-      set({ user: null, profile: null, loading: false });
+      set({ user: null, profile: null, isMock: false, loading: false });
     }
   },
 
@@ -121,6 +106,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setProfile: (profile) => set({ profile }),
+
+  setUserAndProfile: (user, profile) => set({ user, profile }),
 
   loginMock: (email, role, fullName) => {
     const mockUser = { id: `mock-uuid-${role}`, email };

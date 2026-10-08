@@ -30,3 +30,6 @@ dist.zip
 
 # Uploads
 public/uploads/**/*
+
+# Temporary scratch files
+scratch/

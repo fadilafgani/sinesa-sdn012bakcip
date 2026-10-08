@@ -10,5 +10,6 @@ export type RealtimeEvent =
   | 'StageChanged'
   | 'QuestionChanged'
   | 'TimerUpdated'
+  | 'TimerTick'
   | 'LeaderboardUpdated'
   | 'QuizFinished';

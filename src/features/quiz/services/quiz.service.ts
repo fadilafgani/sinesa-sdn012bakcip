@@ -1,4 +1,4 @@
-import { supabase } from '@/core/supabase';
+import { apiClient } from '@/core/api-client';
 import { safeCall, cachedSafeCall, clearQueryCache } from '@/shared/services/base.service';
 import type { ServiceResponse } from '@/shared/services/base.service';
 import type { Quiz } from '@/types';
@@ -7,54 +7,35 @@ export const QuizService = {
   async getQuizzesByTeacherId(teacherId: string): Promise<ServiceResponse<Quiz[]>> {
     console.log('[SYNC] QuizService.getQuizzesByTeacherId', { teacherId });
     return cachedSafeCall(`quizzes_teacher_${teacherId}`, 10000, () =>
-      supabase
-        .from('quizzes')
-        .select('*')
-        .eq('teacher_id', teacherId)
-        .order('created_at', { ascending: false })
+      apiClient.get<Quiz[]>('/quizzes', { params: { teacher_id: teacherId } })
     );
   },
 
   async getAllQuizzes(): Promise<ServiceResponse<Quiz[]>> {
     console.log('[SYNC] QuizService.getAllQuizzes');
     return cachedSafeCall('quizzes_all', 10000, () =>
-      supabase
-        .from('quizzes')
-        .select('*')
-        .order('created_at', { ascending: false })
+      apiClient.get<Quiz[]>('/quizzes')
     );
   },
 
   async getQuizById(id: string): Promise<ServiceResponse<Quiz>> {
     console.log('[SYNC] QuizService.getQuizById', { id });
     return cachedSafeCall(`quiz_${id}`, 15000, () =>
-      supabase
-        .from('quizzes')
-        .select('*')
-        .eq('id', id)
-        .single()
+      apiClient.get<Quiz>('/quizzes', { params: { id } })
     );
   },
 
   async getQuizByPin(pinCode: string): Promise<ServiceResponse<Quiz>> {
     console.log('[SYNC] QuizService.getQuizByPin', { pinCode });
     return cachedSafeCall(`quiz_pin_${pinCode}`, 15000, () =>
-      supabase
-        .from('quizzes')
-        .select('*')
-        .eq('pin_code', pinCode)
-        .single()
+      apiClient.get<Quiz>('/quizzes', { params: { pin: pinCode } })
     );
   },
 
   async createQuiz(quiz: Omit<Quiz, 'created_at' | 'updated_at'>): Promise<ServiceResponse<Quiz>> {
     console.log('[SYNC] QuizService.createQuiz', quiz);
     const res = await safeCall<Quiz>(
-      supabase
-        .from('quizzes')
-        .insert(quiz)
-        .select()
-        .single()
+      apiClient.post<Quiz>('/quizzes', quiz)
     );
     if (res.success) {
       clearQueryCache('quizzes');
@@ -65,12 +46,7 @@ export const QuizService = {
   async updateQuiz(id: string, updates: Partial<Quiz>): Promise<ServiceResponse<Quiz>> {
     console.log('[SYNC] QuizService.updateQuiz', { id, updates });
     const res = await safeCall<Quiz>(
-      supabase
-        .from('quizzes')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single()
+      apiClient.put<Quiz>('/quizzes', updates, { params: { id } })
     );
     if (res.success) {
       clearQueryCache('quizzes');
@@ -85,10 +61,7 @@ export const QuizService = {
   async deleteQuiz(id: string): Promise<ServiceResponse<void>> {
     console.log('[SYNC] QuizService.deleteQuiz', { id });
     const res = await safeCall<void>(
-      supabase
-        .from('quizzes')
-        .delete()
-        .eq('id', id)
+      apiClient.delete<void>('/quizzes', { params: { id } })
     );
     if (res.success) {
       clearQueryCache('quizzes');

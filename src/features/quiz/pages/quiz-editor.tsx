@@ -219,7 +219,7 @@ export const QuizEditor: React.FC = () => {
         return;
       }
 
-      // Supabase Online Load
+      // Online API Load
       try {
         const quizRes = await QuizService.getQuizById(quizId);
         const quiz = quizRes.success ? quizRes.data : null;
@@ -493,7 +493,7 @@ export const QuizEditor: React.FC = () => {
       return;
     }
 
-    // Online Supabase Flow
+    // Online API Flow
     try {
       const userRes = await AuthService.getSession();
       const user = userRes.data?.session?.user;
@@ -598,7 +598,7 @@ export const QuizEditor: React.FC = () => {
         if (!optsRes.success) throw optsRes.error;
       }
 
-      setMessage({ type: 'success', text: 'Kuis berhasil disimpan ke Cloud Supabase!' });
+      setMessage({ type: 'success', text: 'Kuis berhasil disimpan!' });
       setSavedQuizId(id);
       setShowSuccessModal(true);
 

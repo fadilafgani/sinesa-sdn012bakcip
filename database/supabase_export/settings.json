@@ -1,0 +1,37 @@
+[
+    {
+        "key": "app_name",
+        "value": "SINESA",
+        "updated_at": "2026-07-14T08:20:04.566+00:00"
+    },
+    {
+        "key": "app_logo",
+        "value": "https://api.dicebear.com/7.x/shapes/svg?seed=sinesa",
+        "updated_at": "2026-07-14T08:20:04.566+00:00"
+    },
+    {
+        "key": "theme_color",
+        "value": "blue",
+        "updated_at": "2026-07-14T08:20:04.566+00:00"
+    },
+    {
+        "key": "registration_enabled",
+        "value": "true",
+        "updated_at": "2026-07-14T08:20:04.566+00:00"
+    },
+    {
+        "key": "default_anti_cheat_enabled",
+        "value": "false",
+        "updated_at": "2026-07-14T08:20:04.566+00:00"
+    },
+    {
+        "key": "default_leaderboard_enabled",
+        "value": "true",
+        "updated_at": "2026-07-14T08:20:04.567+00:00"
+    },
+    {
+        "key": "default_show_final_result",
+        "value": "true",
+        "updated_at": "2026-07-14T08:20:04.567+00:00"
+    }
+]

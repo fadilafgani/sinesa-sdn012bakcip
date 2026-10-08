@@ -50,6 +50,14 @@ export const HostSession: React.FC = () => {
   const { participants } = useParticipants();
   const { submissions } = useAnswer();
 
+  console.log('COMPONENT_RENDER', 'HostSession', {
+    stage: activeSession?.current_stage,
+    status: activeSession?.status,
+    qIndex: activeSession?.current_question_index,
+    partCount: participants.length,
+    ansCount: submissions.length
+  });
+
   const [pinCode, setPinCode] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false);
@@ -166,7 +174,7 @@ export const HostSession: React.FC = () => {
     }
   }, [activeSession?.id, questions.length, quizId]);
 
-  // Load initial data once and subscribe to Supabase Realtime updates
+  // Load initial data once and subscribe to Realtime updates
   useEffect(() => {
     if (!activeSession?.id || isMock) return;
 

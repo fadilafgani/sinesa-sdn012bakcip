@@ -13,10 +13,10 @@ import { AuthService } from '@/features/auth/services/auth.service';
 import { RealtimeManager } from '@/core/realtime/realtime-manager';
 import { realtimeEvents } from '@/core/realtime/realtime-events';
 import { AnalyticsService } from '@/shared/services/analytics.service';
+import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '@/types';
 
 const VIRTUAL_NAMES = ['Budi Santoso', 'Ani Wijaya', 'Dedi Kurniawan', 'Siti Rahma', 'Joko Susilo', 'Rini Astuti'];
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 
 let realtimeUnsubs: (() => void)[] = [];
 let creationPromise: Promise<string | null> | null = null;
@@ -505,11 +505,13 @@ export const sessionActions = {
     const unsubJoined = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
       const current = useParticipantStore.getState().participants;
       if (current.some(p => p.id === newPart.id)) return;
+      console.log('STORE_UPDATED', 'participants_joined', newPart.display_name);
       useParticipantStore.setState({ participants: [...current, newPart] });
     });
 
     const unsubUpdated = realtimeEvents.on('ParticipantUpdated', (updatedPart: Participant) => {
       const current = useParticipantStore.getState().participants;
+      console.log('STORE_UPDATED', 'participant_updated', updatedPart.display_name);
       useParticipantStore.setState({
         participants: current.map(p => p.id === updatedPart.id ? updatedPart : p)
       });
@@ -517,6 +519,7 @@ export const sessionActions = {
 
     const unsubLeft = realtimeEvents.on('ParticipantLeft', (leftPart: Participant) => {
       const current = useParticipantStore.getState().participants;
+      console.log('STORE_UPDATED', 'participant_left', leftPart.display_name);
       useParticipantStore.setState({
         participants: current.filter(p => p.id !== leftPart.id)
       });
@@ -531,17 +534,20 @@ export const sessionActions = {
 
     RealtimeManager.connectAsHost(sessionId);
 
-    const unsub = realtimeEvents.on('AnswerSubmitted', (newAns: Answer) => {
+    const unsub = realtimeEvents.on('AnswerSubmitted', (newAns: any) => {
       const currentQuestion = useQuestionStore.getState().currentQuestion;
-      if (!currentQuestion || newAns.question_id !== currentQuestion.id) return;
+      if (!currentQuestion) return;
 
-      const participants = useParticipantStore.getState().participants;
-      const isParticipant = participants.some(p => p.id === newAns.participant_id);
-      if (!isParticipant) return;
+      if (newAns && newAns.question_id && newAns.question_id !== currentQuestion.id) return;
 
       const submissions = useAnswerStore.getState().submissions;
-      if (submissions.some(s => s.id === newAns.id)) return;
-      useAnswerStore.setState({ submissions: [...submissions, newAns] });
+      if (newAns && newAns.id && !submissions.some(s => s.id === newAns.id)) {
+        console.log('STORE_UPDATED', 'submissions_add', newAns);
+        useAnswerStore.setState({ submissions: [...submissions, newAns] });
+      }
+
+      // Also refresh answers in background to ensure accurate distribution
+      sessionActions.fetchAnswers(sessionId);
     });
     realtimeUnsubs.push(unsub);
   },
@@ -575,13 +581,30 @@ export const sessionActions = {
         }
       }
 
+      console.log('STORE_UPDATED', 'activeSession', updatedSess);
       useSessionStore.setState({ activeSession: updatedSess });
       useQuestionStore.setState({
         currentQuestion: activeQuestion,
         currentOptions: activeOptions,
       });
     });
-    realtimeUnsubs.push(unsub);
+
+    const unsubLeaderboard = realtimeEvents.on('LeaderboardUpdated', (leaderboardList: any[]) => {
+      if (!Array.isArray(leaderboardList) || leaderboardList.length === 0) return;
+      const current = useParticipantStore.getState().participants;
+      const updated = current.map(p => {
+        const found = leaderboardList.find(lb => lb.id === p.id);
+        if (found) {
+          return { ...p, score: found.score, lives: found.lives, rank: found.rank };
+        }
+        return p;
+      });
+      console.log('STORE_UPDATED', 'leaderboard_scores', leaderboardList.length);
+      useParticipantStore.setState({ participants: updated });
+      useLeaderboardStore.setState({ leaderboard: leaderboardList });
+    });
+
+    realtimeUnsubs.push(unsub, unsubLeaderboard);
   },
 
   unsubscribeAll: () => {
@@ -743,7 +766,7 @@ export const sessionActions = {
         await refreshAuth();
         try {
           const startFetch = Date.now();
-          const res = await fetch(supabaseUrl + '/rest/v1/', { method: 'GET' });
+          const res = await fetch('/api/settings', { method: 'GET' });
           const serverDateHeader = res.headers.get('date');
           if (serverDateHeader) {
             const serverTime = new Date(serverDateHeader).getTime();
@@ -818,11 +841,12 @@ export const sessionActions = {
           }
 
           if (partErr || !newPart) {
-            const isUniqueViolation = partErr && partErr.code === '23505';
+            const errMsg = typeof partErr === 'string' ? partErr : (partErr?.message || '');
+            const isUniqueViolation = (partErr && partErr.code === '23505') || errMsg.includes('sudah digunakan');
             useUiStore.setState({
               error: isUniqueViolation
                 ? 'Nama tampilan sudah digunakan di lobby ini.'
-                : `Gagal bergabung: ${partErr?.message || 'Unknown error'}`,
+                : `Gagal bergabung: ${errMsg || 'Unknown error'}`,
               loading: false
             });
             return false;
@@ -917,8 +941,8 @@ export const sessionActions = {
       const isStageChanged = !currentSession || currentSession.current_stage !== updatedSess.current_stage;
       const isIndexChanged = !currentSession || currentSession.current_question_index !== updatedSess.current_question_index;
 
+      console.log('STORE_UPDATED', 'session', updatedSess);
       useSessionStore.setState({ session: updatedSess });
-      console.log('STORE_UPDATED', updatedSess);
 
       if (isStageChanged || isIndexChanged) {
         await sessionActions.handleSessionUpdate(updatedSess);
@@ -928,6 +952,7 @@ export const sessionActions = {
     const handlePartUpdate = (updatedPart: Participant) => {
       const participant = useParticipantStore.getState().participant;
       if (participant && updatedPart.id === participant.id) {
+        console.log('STORE_UPDATED', 'my_participant', updatedPart);
         useParticipantStore.setState({
           participant: updatedPart,
           lives: updatedPart.lives !== undefined ? updatedPart.lives : useParticipantStore.getState().lives
@@ -965,14 +990,30 @@ export const sessionActions = {
 
   handleSessionUpdate: async (updatedSess: QuizSession) => {
     console.log('HANDLE_SESSION_UPDATE', updatedSess);
-    const questions = useQuestionStore.getState().questions;
+    let questions = useQuestionStore.getState().questions;
+
+    // Fallback: If questions are not yet loaded in store, fetch them from server
+    if ((!questions || questions.length === 0) && updatedSess.quiz_id) {
+      const qRes = await QuestionService.getQuestions(updatedSess.quiz_id);
+      if (qRes.success && qRes.data && qRes.data.length > 0) {
+        questions = qRes.data;
+        useQuestionStore.setState({ questions });
+      }
+    }
+
     const answersMap = useAnswerStore.getState().answersMap;
     const activeIdx = updatedSess.current_question_index;
 
-    if (activeIdx >= 0 && questions[activeIdx]) {
+    if (activeIdx >= 0 && questions && questions[activeIdx]) {
       const nextQ = questions[activeIdx];
       const opts = await fetchOptionsById(nextQ.id);
       const hasAns = !!answersMap[nextQ.id];
+
+      console.log('STORE_UPDATED', 'question_active', {
+        stage: updatedSess.current_stage,
+        index: activeIdx,
+        questionId: nextQ.id
+      });
 
       useQuestionStore.setState({
         currentQuestionIndex: activeIdx,
@@ -987,6 +1028,11 @@ export const sessionActions = {
         questionStartedAt: Date.now()
       });
     } else {
+      console.log('STORE_UPDATED', 'question_cleared', {
+        stage: updatedSess.current_stage,
+        index: activeIdx
+      });
+
       useQuestionStore.setState({
         currentQuestion: null,
         currentOptions: [],

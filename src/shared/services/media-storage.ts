@@ -2,7 +2,7 @@
  * Media Storage Service for SINESA
  * Handles file upload, replace, delete, and client-side optimization.
  */
-import { supabase } from '@/core/supabase';
+import { apiClient } from '@/core/api-client';
 
 export interface MediaUploadOptions {
   type: 'profiles' | 'thumbnails' | 'quiz-images' | 'quiz-audio' | 'quiz-videos';
@@ -192,8 +192,7 @@ class MediaStorageService implements IMediaStorageService {
     formData.append('action', 'upload');
 
     // 3. Retrieve auth session token
-    const sessionRes = await supabase.auth.getSession();
-    const token = sessionRes.data.session?.access_token || '';
+    const token = apiClient.getAccessToken() || '';
 
     // 4. Upload with retry logic
     return retryPromise(
@@ -220,8 +219,7 @@ class MediaStorageService implements IMediaStorageService {
     formData.append('type', type);
     formData.append('file_url', fileUrl);
 
-    const sessionRes = await supabase.auth.getSession();
-    const token = sessionRes.data.session?.access_token || '';
+    const token = apiClient.getAccessToken() || '';
 
     try {
       const headers: Record<string, string> = {};

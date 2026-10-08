@@ -94,7 +94,7 @@ export const Analytics: React.FC = () => {
         return;
       }
 
-      // Online Supabase flow
+      // Online API flow
       try {
         const quizRes = await QuizService.getQuizById(quizId);
         const quizData = quizRes.data;

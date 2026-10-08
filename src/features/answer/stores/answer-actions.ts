@@ -134,18 +134,24 @@ export const answerActions = {
 
       if (!insertRes.success) throw insertRes.error;
 
+      console.log('DATABASE_UPDATED', 'answer_submitted', insertRes.data);
+
       const actualScore = insertRes.data?.score_awarded ?? scoreAwarded;
       const actualIsCorrect = insertRes.data?.is_correct ?? isCorrect;
 
-      const newScore = participant.score + actualScore;
-      const updateRes = await ParticipantService.updateParticipant(participant.id, {
-        score: newScore,
-        lives: newLives,
-        question_status: updatedStatuses,
-      });
+      const returnedPart = (insertRes.data as any)?.participant;
+      let updatedPart = returnedPart;
 
-      if (!updateRes.success) throw updateRes.error;
-      const updatedPart = updateRes.data;
+      if (!updatedPart) {
+        const newScore = participant.score + actualScore;
+        const updateRes = await ParticipantService.updateParticipant(participant.id, {
+          score: newScore,
+          lives: newLives,
+          question_status: updatedStatuses,
+        });
+        if (!updateRes.success) throw updateRes.error;
+        updatedPart = updateRes.data;
+      }
 
       if (updatedPart) {
         const submittedAnswer: Answer = {
@@ -284,22 +290,25 @@ export const answerActions = {
       localStorage.setItem(partsKey, JSON.stringify(updatedParts));
     } else {
       try {
-        await AnswerService.submitAnswer({
+        const subRes = await AnswerService.submitAnswer({
           participant_id: participant.id,
           question_id: currentQuestion.id,
           selected_option_id: optionIdToSave,
           selected_option_ids: optionIdsToSave,
           matching_answers: matchingAnswersToSave,
-          is_correct: isCorrect,
           response_time_ms: responseTime,
-          score_awarded: scoreAwarded,
-        });
+        } as any);
 
-        await ParticipantService.updateParticipant(participant.id, {
-          score: newScore,
-          lives: newLives,
-          question_status: updatedStatuses
-        });
+        if (subRes.success && (subRes.data as any)?.participant) {
+          const retPart = (subRes.data as any).participant;
+          useParticipantStore.setState({ participant: retPart, lives: retPart.lives });
+        } else {
+          await ParticipantService.updateParticipant(participant.id, {
+            score: newScore,
+            lives: newLives,
+            question_status: updatedStatuses
+          });
+        }
       } catch (e) {
         console.error('Failed to submit self-paced answer:', e);
       }
