@@ -25,7 +25,7 @@ class JWT {
             return substr(hash('sha256', $supabaseAnon), 0, 32);
         }
 
-        return 'sinesa_super_secret_jwt_key_sdn012_babakanciparay_2026';
+        return 'sinesa_produksi_sdn012_secret_key_2026_acak_bebas';
     }
 
     /**
