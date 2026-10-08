@@ -28,26 +28,34 @@ class Database {
             return (string)$_SERVER[$key];
         }
 
-        // Try reading root .env file if available
+        // Try reading .env file if available (supports public_html/.env and home/username/.env)
         static $envCache = null;
         if ($envCache === null) {
             $envCache = [];
-            $envPath = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '.env';
-            if (file_exists($envPath) && is_readable($envPath)) {
-                $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if ($line === '' || strpos($line, '#') === 0) continue;
-                    $parts = explode('=', $line, 2);
-                    if (count($parts) === 2) {
-                        $k = trim($parts[0]);
-                        $v = trim($parts[1]);
-                        if (strpos($v, '"') === 0 && strrpos($v, '"') === strlen($v) - 1) {
-                            $v = substr($v, 1, -1);
-                        } elseif (strpos($v, "'") === 0 && strrpos($v, "'") === strlen($v) - 1) {
-                            $v = substr($v, 1, -1);
+            $candidatePaths = [
+                dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env', // /public_html/.env
+                dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '.env', // /home/username/.env (one level above public_html)
+                dirname(__DIR__, 1) . DIRECTORY_SEPARATOR . '.env', // /public_html/api/.env
+            ];
+
+            foreach ($candidatePaths as $envPath) {
+                if (file_exists($envPath) && is_readable($envPath)) {
+                    $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+                    foreach ($lines as $line) {
+                        $line = trim($line);
+                        if ($line === '' || strpos($line, '#') === 0) continue;
+                        $parts = explode('=', $line, 2);
+                        if (count($parts) === 2) {
+                            $k = trim($parts[0]);
+                            $v = trim($parts[1]);
+                            if ((strpos($v, '"') === 0 && strrpos($v, '"') === strlen($v) - 1) ||
+                                (strpos($v, "'") === 0 && strrpos($v, "'") === strlen($v) - 1)) {
+                                $v = substr($v, 1, -1);
+                            }
+                            if (!isset($envCache[$k])) {
+                                $envCache[$k] = $v;
+                            }
                         }
-                        $envCache[$k] = $v;
                     }
                 }
             }
