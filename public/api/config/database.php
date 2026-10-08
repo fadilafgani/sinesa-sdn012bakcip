@@ -28,15 +28,22 @@ class Database {
             return (string)$_SERVER[$key];
         }
 
-        // Try reading .env file if available (supports public_html/.env and home/username/.env)
+        // Try reading .env file if available (supports public_html/.env, DOCUMENT_ROOT, and home/username/.env)
         static $envCache = null;
         if ($envCache === null) {
             $envCache = [];
+            $docRoot = isset($_SERVER['DOCUMENT_ROOT']) && $_SERVER['DOCUMENT_ROOT'] !== '' ? rtrim((string)$_SERVER['DOCUMENT_ROOT'], '/\\') : null;
+
             $candidatePaths = [
                 dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env', // /public_html/.env
                 dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '.env', // /home/username/.env (one level above public_html)
                 dirname(__DIR__, 1) . DIRECTORY_SEPARATOR . '.env', // /public_html/api/.env
             ];
+
+            if ($docRoot !== null) {
+                $candidatePaths[] = $docRoot . DIRECTORY_SEPARATOR . '.env';
+                $candidatePaths[] = dirname($docRoot) . DIRECTORY_SEPARATOR . '.env';
+            }
 
             foreach ($candidatePaths as $envPath) {
                 if (file_exists($envPath) && is_readable($envPath)) {
@@ -72,7 +79,7 @@ class Database {
             return self::$instance;
         }
 
-        $host = self::getEnv('DB_HOST', '127.0.0.1');
+        $host = self::getEnv('DB_HOST', 'localhost');
         $port = self::getEnv('DB_PORT', '3306');
         $dbName = self::getEnv('DB_NAME', 'sinesa_db');
         $user = self::getEnv('DB_USER', 'root');
@@ -92,9 +99,10 @@ class Database {
             self::$instance = new PDO($dsn, $user, $pass, $options);
             return self::$instance;
         } catch (PDOException $e) {
-            // Log real database error privately and return safe error JSON
+            // Log real database error and return diagnostic details to quickly resolve connection
             error_log('[SINESA_DB_ERROR] Connection failed: ' . $e->getMessage());
-            send_error_response('Gagal menghubungkan ke database server lokal.', 500);
+            $debugMsg = 'Gagal menghubungkan ke database: ' . $e->getMessage() . " (Host: {$host}, Port: {$port}, Database: {$dbName}, User: {$user})";
+            send_error_response($debugMsg, 500);
         }
     }
 }
