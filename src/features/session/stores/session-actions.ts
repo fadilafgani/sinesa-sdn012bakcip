@@ -18,9 +18,11 @@ import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '@
 
 const VIRTUAL_NAMES = ['Budi Santoso', 'Ani Wijaya', 'Dedi Kurniawan', 'Siti Rahma', 'Joko Susilo', 'Rini Astuti'];
 
-let realtimeUnsubs: (() => void)[] = [];
+let hostRealtimeUnsubs: (() => void)[] = [];
+let studentRealtimeUnsubs: (() => void)[] = [];
 let creationPromise: Promise<string | null> | null = null;
 let joinPromise: Promise<boolean> | null = null;
+let activeSessionUpdateSeq = 0;
 
 const refreshAuth = async () => {
   await AuthService.refreshSession();
@@ -56,7 +58,13 @@ async function updateSessionStage(
   console.log('[SYNC] HostStore: Updating DB with', updates);
   const res = await SessionService.updateSession(sessionId, updates);
   if (!res.success) throw res.error;
-  console.log('DATABASE_UPDATED', updates);
+  console.log('DATABASE_UPDATE_SUCCESS', {
+    sessionId,
+    stage: updates.current_stage,
+    index: updates.current_question_index,
+    status: updates.status,
+    timestamp: Date.now()
+  });
   console.log('[SYNC] HostStore: DB updated. Setting local state...');
   useSessionStore.setState({ activeSession: fullSession });
   if (extraLocalState) {
@@ -258,6 +266,8 @@ export const sessionActions = {
     const session = useSessionStore.getState().activeSession;
     if (!session) return;
 
+    console.log('HOST_ACTION', { action: 'startQuiz', sessionId: session.id, targetStage: 'countdown' });
+
     const updated: QuizSession = {
       ...session,
       status: 'active',
@@ -279,6 +289,8 @@ export const sessionActions = {
     if (!session) {
       throw new Error('Sesi kuis tidak aktif atau tidak ditemukan.');
     }
+
+    console.log('HOST_ACTION', { action: 'nextQuestion', sessionId: session.id, currentIdx: session.current_question_index });
 
     let questions = useQuestionStore.getState().questions;
     const isMock = checkIsMock();
@@ -356,6 +368,8 @@ export const sessionActions = {
     const currentQuestion = useQuestionStore.getState().currentQuestion;
     const options = useQuestionStore.getState().currentOptions;
     if (!session || !currentQuestion) return;
+
+    console.log('HOST_ACTION', { action: 'publishQuestionStage', sessionId: session.id, questionId: currentQuestion.id });
 
     await refreshAuth();
     const isMock = checkIsMock();
@@ -448,6 +462,8 @@ export const sessionActions = {
     const session = useSessionStore.getState().activeSession;
     if (!session) return;
 
+    console.log('HOST_ACTION', { action: 'endQuiz', sessionId: session.id });
+
     const now = new Date().toISOString();
     const updated: QuizSession = {
       ...session,
@@ -471,6 +487,8 @@ export const sessionActions = {
   revealAnswer: async () => {
     const session = useSessionStore.getState().activeSession;
     if (!session) return;
+
+    console.log('HOST_ACTION', { action: 'revealAnswer', sessionId: session.id });
 
     const now = new Date().toISOString();
     const updated: QuizSession = {
@@ -525,7 +543,7 @@ export const sessionActions = {
       });
     });
 
-    realtimeUnsubs.push(unsubJoined, unsubUpdated, unsubLeft);
+    hostRealtimeUnsubs.push(unsubJoined, unsubUpdated, unsubLeft);
   },
 
   subscribeToAnswers: (sessionId: string) => {
@@ -549,7 +567,7 @@ export const sessionActions = {
       // Also refresh answers in background to ensure accurate distribution
       sessionActions.fetchAnswers(sessionId);
     });
-    realtimeUnsubs.push(unsub);
+    hostRealtimeUnsubs.push(unsub);
   },
 
   subscribeToSession: (sessionId: string) => {
@@ -557,11 +575,13 @@ export const sessionActions = {
     if (isMock) return;
 
     RealtimeManager.connectAsHost(sessionId);
+    console.log('SUBSCRIPTION_STATUS', { role: 'host', sessionId, status: 'CONNECTING' });
 
     const unsubStatus = RealtimeManager.onStatusChange((status) => {
+      console.log('SUBSCRIPTION_STATUS', { role: 'host', sessionId, status });
       useSessionStore.setState({ realtimeStatus: status });
     });
-    realtimeUnsubs.push(unsubStatus);
+    hostRealtimeUnsubs.push(unsubStatus);
 
     const unsub = realtimeEvents.on('SessionUpdated', async (updatedSess: QuizSession) => {
       if (updatedSess.id !== sessionId) return;
@@ -604,15 +624,16 @@ export const sessionActions = {
       useLeaderboardStore.setState({ leaderboard: leaderboardList });
     });
 
-    realtimeUnsubs.push(unsub, unsubLeaderboard);
+    hostRealtimeUnsubs.push(unsub, unsubLeaderboard);
   },
 
   unsubscribeAll: () => {
     RealtimeManager.disconnect();
-    realtimeUnsubs.forEach(unsub => {
+    hostRealtimeUnsubs.forEach(unsub => {
       try { unsub(); } catch (_) {}
     });
-    realtimeUnsubs = [];
+    hostRealtimeUnsubs = [];
+    console.log('SUBSCRIPTION_STATUS', { role: 'host', status: 'UNSUBSCRIBED_ALL' });
   },
 
   fetchParticipants: async (sessionId: string) => {
@@ -926,11 +947,12 @@ export const sessionActions = {
     sessionActions.stopListening();
 
     const participant = useParticipantStore.getState().participant;
-    if (!participant) return;
+    console.log('SUBSCRIPTION_STATUS', { role: 'student', sessionId, participantId: participant?.id || null, status: 'CONNECTING' });
 
-    RealtimeManager.connectAsStudent(sessionId, participant.id);
+    RealtimeManager.connectAsStudent(sessionId, participant?.id || '');
 
     const unsubStatus = RealtimeManager.onStatusChange((status) => {
+      console.log('SUBSCRIPTION_STATUS', { role: 'student', sessionId, status });
       useSessionStore.setState({ realtimeStatus: status });
     });
 
@@ -941,7 +963,7 @@ export const sessionActions = {
       const isStageChanged = !currentSession || currentSession.current_stage !== updatedSess.current_stage;
       const isIndexChanged = !currentSession || currentSession.current_question_index !== updatedSess.current_question_index;
 
-      console.log('STORE_UPDATED', 'session', updatedSess);
+      console.log('STORE_UPDATED', { type: 'session', stage: updatedSess.current_stage, index: updatedSess.current_question_index });
       useSessionStore.setState({ session: updatedSess });
 
       if (isStageChanged || isIndexChanged) {
@@ -952,7 +974,7 @@ export const sessionActions = {
     const handlePartUpdate = (updatedPart: Participant) => {
       const participant = useParticipantStore.getState().participant;
       if (participant && updatedPart.id === participant.id) {
-        console.log('STORE_UPDATED', 'my_participant', updatedPart);
+        console.log('STORE_UPDATED', { type: 'my_participant', id: updatedPart.id, score: updatedPart.score, lives: updatedPart.lives });
         useParticipantStore.setState({
           participant: updatedPart,
           lives: updatedPart.lives !== undefined ? updatedPart.lives : useParticipantStore.getState().lives
@@ -968,15 +990,16 @@ export const sessionActions = {
     const unsubPart = realtimeEvents.on('ParticipantUpdated', handlePartUpdate);
     const unsubMyPart = realtimeEvents.on('MyParticipantUpdated', handlePartUpdate);
 
-    realtimeUnsubs.push(unsubStatus, unsubSess, unsubPart, unsubMyPart);
+    studentRealtimeUnsubs.push(unsubStatus, unsubSess, unsubPart, unsubMyPart);
   },
 
   stopListening: () => {
     RealtimeManager.disconnect();
-    realtimeUnsubs.forEach(unsub => {
+    studentRealtimeUnsubs.forEach(unsub => {
       try { unsub(); } catch (_) {}
     });
-    realtimeUnsubs = [];
+    studentRealtimeUnsubs = [];
+    console.log('SUBSCRIPTION_STATUS', { role: 'student', status: 'STOPPED' });
   },
 
   leaveSession: () => {
@@ -989,7 +1012,6 @@ export const sessionActions = {
   },
 
   handleSessionUpdate: async (updatedSess: QuizSession) => {
-    console.log('HANDLE_SESSION_UPDATE', updatedSess);
     let questions = useQuestionStore.getState().questions;
 
     // Fallback: If questions are not yet loaded in store, fetch them from server
@@ -998,22 +1020,37 @@ export const sessionActions = {
       if (qRes.success && qRes.data && qRes.data.length > 0) {
         questions = qRes.data;
         useQuestionStore.setState({ questions });
+        console.log('ASYNC_FETCH_COMPLETED', { type: 'questions', count: questions.length });
       }
     }
 
     const answersMap = useAnswerStore.getState().answersMap;
     const activeIdx = updatedSess.current_question_index;
 
+    const seq = ++activeSessionUpdateSeq;
+
     if (activeIdx >= 0 && questions && questions[activeIdx]) {
       const nextQ = questions[activeIdx];
-      const opts = await fetchOptionsById(nextQ.id);
-      const hasAns = !!answersMap[nextQ.id];
+      const prevQ = useQuestionStore.getState().currentQuestion;
+      const prevIdx = useQuestionStore.getState().currentQuestionIndex;
+      const isNewQuestion = !prevQ || prevQ.id !== nextQ.id || prevIdx !== activeIdx;
 
-      console.log('STORE_UPDATED', 'question_active', {
-        stage: updatedSess.current_stage,
-        index: activeIdx,
-        questionId: nextQ.id
-      });
+      // Only fetch options if it's a new question or options are currently empty
+      const opts = (isNewQuestion || useQuestionStore.getState().currentOptions.length === 0)
+        ? await fetchOptionsById(nextQ.id)
+        : useQuestionStore.getState().currentOptions;
+
+      // Discard stale async fetch result if a newer session update started in the meantime
+      if (seq !== activeSessionUpdateSeq) {
+        console.log('STALE_ASYNC_FETCH_DISCARDED', { seq, currentSeq: activeSessionUpdateSeq, questionId: nextQ.id });
+        return;
+      }
+
+      if (isNewQuestion) {
+        console.log('ASYNC_FETCH_COMPLETED', { type: 'options', questionId: nextQ.id, optionsCount: opts.length });
+      }
+
+      const hasAns = !!answersMap[nextQ.id];
 
       useQuestionStore.setState({
         currentQuestionIndex: activeIdx,
@@ -1021,18 +1058,26 @@ export const sessionActions = {
         currentOptions: opts,
       });
 
+      // Preserve existing questionStartedAt if same question, only initialize if new question
+      const existingStartedAt = useAnswerStore.getState().questionStartedAt;
+      const startedAt = (isNewQuestion || !existingStartedAt) ? Date.now() : existingStartedAt;
+
       useAnswerStore.setState({
         hasAnswered: hasAns,
         isAnswerCorrect: hasAns ? answersMap[nextQ.id].is_correct : null,
         scoreAwarded: hasAns ? answersMap[nextQ.id].score_awarded : 0,
-        questionStartedAt: Date.now()
-      });
-    } else {
-      console.log('STORE_UPDATED', 'question_cleared', {
-        stage: updatedSess.current_stage,
-        index: activeIdx
+        questionStartedAt: startedAt,
       });
 
+      console.log('STORE_UPDATED', {
+        type: 'question_active',
+        stage: updatedSess.current_stage,
+        index: activeIdx,
+        questionId: nextQ.id,
+        isNewQuestion,
+        hasAnswered: hasAns,
+      });
+    } else {
       useQuestionStore.setState({
         currentQuestion: null,
         currentOptions: [],
@@ -1041,6 +1086,11 @@ export const sessionActions = {
         hasAnswered: false,
         isAnswerCorrect: null,
         scoreAwarded: 0,
+      });
+      console.log('STORE_UPDATED', {
+        type: 'question_cleared',
+        stage: updatedSess.current_stage,
+        index: activeIdx,
       });
     }
   }

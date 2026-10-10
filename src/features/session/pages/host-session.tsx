@@ -58,6 +58,16 @@ export const HostSession: React.FC = () => {
     ansCount: submissions.length
   });
 
+  console.log('UI_RENDERED', {
+    role: 'host',
+    stage: activeSession?.current_stage,
+    status: activeSession?.status,
+    questionIndex: activeSession?.current_question_index,
+    partCount: participants.length,
+    ansCount: submissions.length,
+    timestamp: Date.now()
+  });
+
   const [pinCode, setPinCode] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false);

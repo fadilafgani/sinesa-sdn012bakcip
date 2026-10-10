@@ -36,6 +36,7 @@ export const PlaySession: React.FC = () => {
   const {
     session,
     quiz,
+    realtimeStatus,
     joinSession,
     leaveSession,
     listenToSession,
@@ -68,6 +69,15 @@ export const PlaySession: React.FC = () => {
   } = useAnswer();
 
   const { loading, error: playError } = useUiStore();
+
+  console.log('UI_RENDERED', {
+    role: 'student',
+    stage: session?.current_stage,
+    questionIndex: session?.current_question_index,
+    hasQuestion: !!currentQuestion,
+    hasParticipant: !!participant,
+    timestamp: Date.now(),
+  });
 
   const showFeedback = session?.current_stage === 'question_result';
   const setShowFeedback = (_val: boolean) => {}; // Dummy to support legacy/unreachable self-paced code compilation
@@ -498,11 +508,32 @@ export const PlaySession: React.FC = () => {
     );
   }
 
+  const renderConnectionToast = () => {
+    if (realtimeStatus === 'RECONNECTING') {
+      return (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-bold shadow-xl animate-pulse backdrop-blur">
+          <span className="w-2 h-2 rounded-full bg-black animate-ping" />
+          Menghubungkan kembali ke server...
+        </div>
+      );
+    }
+    if (realtimeStatus === 'ERROR') {
+      return (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <AlertCircle className="w-3.5 h-3.5" />
+          Koneksi terganggu. Menggunakan sinkronisasi cadangan...
+        </div>
+      );
+    }
+    return null;
+  };
+
   // 1. Lobby Waiting Screen
   console.log('[SYNC] PlaySession: Render with stage =', session?.current_stage, 'questionIdx =', session?.current_question_index);
   if (session?.current_stage === 'waiting') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[90vh] text-center p-4">
+        {renderConnectionToast()}
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -550,9 +581,10 @@ export const PlaySession: React.FC = () => {
   }
 
   // 1.5. Countdown Screen
-  if (session?.current_stage === 'countdown' && participant) {
+  if (session?.current_stage === 'countdown') {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-mesh p-4">
+        {renderConnectionToast()}
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -571,9 +603,10 @@ export const PlaySession: React.FC = () => {
   }
 
   // 1.6. Leaderboard Wait Screen
-  if (session?.current_stage === 'leaderboard' && participant) {
+  if (session?.current_stage === 'leaderboard') {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-mesh p-4">
+        {renderConnectionToast()}
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -590,7 +623,7 @@ export const PlaySession: React.FC = () => {
           </div>
           <div className="bg-primary/5 border border-primary/20 p-4 rounded-2xl w-full flex justify-between items-center">
             <span className="text-xs font-bold text-muted-foreground">Skor Anda saat ini:</span>
-            <span className="text-sm font-black text-primary">{participant.score} Pts</span>
+            <span className="text-sm font-black text-primary">{participant?.score ?? 0} Pts</span>
           </div>
         </motion.div>
       </div>
@@ -1083,6 +1116,7 @@ export const PlaySession: React.FC = () => {
   // ============================================
   return (
     <div className="min-h-screen flex flex-col justify-between p-4">
+      {renderConnectionToast()}
       {/* Top bar info */}
       <div className="flex items-center justify-between border-b pb-3 mb-4">
         <div className="flex items-center gap-3 flex-wrap">

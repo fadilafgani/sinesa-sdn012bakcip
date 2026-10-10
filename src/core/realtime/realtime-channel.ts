@@ -58,6 +58,7 @@ export class RealtimeChannelManager {
   }
 
   private setStatus(status: RealtimeStatus) {
+    console.log('SUBSCRIPTION_STATUS', { role: this.role, sessionId: this.sessionId, status });
     logRealtime(`Status Changed: ${status}`);
     this.statusCallbacks.forEach(cb => {
       try { cb(status); } catch (e) { console.error('Error in status callback:', e); }
@@ -97,8 +98,11 @@ export class RealtimeChannelManager {
     this.isExplicitDisconnect = false;
     this.reconnectAttempts = 0;
 
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+
     this.connect();
-    this.startAdaptivePolling();
   }
 
   /**
@@ -134,10 +138,20 @@ export class RealtimeChannelManager {
         this.setStatus('CONNECTED');
         this.reconnectAttempts = 0;
         this.resetHeartbeatWatchdog();
+        // Standby/stop fallback polling when SSE is flowing cleanly
+        this.stopAdaptivePolling();
       };
 
       this.eventSource.onerror = (err) => {
         if (this.isExplicitDisconnect) return;
+        // Engage fallback polling immediately while connection is disrupted
+        this.startAdaptivePolling();
+        console.error('REALTIME_ERROR', {
+          role: this.role,
+          sessionId: this.sessionId,
+          type: 'EventSourceError',
+          readyState: this.eventSource?.readyState,
+        });
         logRealtime('EventSource encountered error or cycle refresh:', err);
         
         // Native EventSource auto-reconnects, but if in CLOSED state, schedule manual reconnect
@@ -229,14 +243,21 @@ export class RealtimeChannelManager {
       this.processedEventIds.add(eventId);
     }
 
-    // 2. Stale event protection (monotonic timestamp per event type)
+    // 2. Stale event protection (with 15s clock-skew tolerance between server and client)
     const lastTs = this.lastEventTimestamps.get(eventType) || 0;
-    if (timestamp < lastTs) {
+    if (lastTs > 0 && timestamp < lastTs - 15000) {
       logRealtime(`Stale event ignored: ${eventType} (ts: ${timestamp} < ${lastTs})`);
       return;
     }
-    this.lastEventTimestamps.set(eventType, timestamp);
+    this.lastEventTimestamps.set(eventType, Math.max(lastTs, timestamp));
 
+    console.log('REALTIME_EVENT_RECEIVED', {
+      eventType,
+      sessionId: this.sessionId,
+      stage: data.stage || data.session?.current_stage || null,
+      questionIndex: data.current_question_index ?? data.session?.current_question_index ?? null,
+      timestamp,
+    });
     console.log('REALTIME_EVENT', eventType, data);
     console.log('EVENT_RECEIVED', eventType, data);
     logRealtime(`Dispatched Event: ${eventType}`, data);
@@ -322,6 +343,8 @@ export class RealtimeChannelManager {
     if (this.isExplicitDisconnect || !this.sessionId) return;
 
     this.setStatus('RECONNECTING');
+    // Ensure fallback polling is running while SSE is disconnected
+    this.startAdaptivePolling();
 
     if (this.eventSource) {
       try {
@@ -348,6 +371,37 @@ export class RealtimeChannelManager {
   }
 
   /**
+   * Immediately resync latest state from REST API (used on tab focus or post-reconnect)
+   */
+  public async resyncStateNow() {
+    if (this.isExplicitDisconnect || !this.sessionId) return;
+    try {
+      const res = await apiClient.get<any>(`/sessions?id=${encodeURIComponent(this.sessionId)}`);
+      if (res.success && res.data) {
+        const session = res.data;
+        realtimeEvents.emit('SessionUpdated', session);
+        if (session.current_stage) {
+          realtimeEvents.emit('StageChanged', session.current_stage);
+        }
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Browser visibility change handler (tab background vs foreground resume)
+   */
+  private handleVisibilityChange = () => {
+    if (typeof document === 'undefined') return;
+    if (document.visibilityState === 'visible' && this.sessionId && !this.isExplicitDisconnect) {
+      logRealtime('Tab resumed active visibility, checking connection and resyncing state...');
+      if (!this.eventSource || this.eventSource.readyState !== EventSource.OPEN) {
+        this.handleReconnect();
+      }
+      this.resyncStateNow();
+    }
+  };
+
+  /**
    * Unsubscribe and perform complete cleanup to prevent memory leaks
    */
   unsubscribe() {
@@ -366,6 +420,10 @@ export class RealtimeChannelManager {
    * Internal resource cleanup
    */
   private cleanup() {
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+
     this.stopAdaptivePolling();
 
     if (this.heartbeatWatchdog) {
@@ -435,7 +493,7 @@ export class RealtimeChannelManager {
           }
 
           // In lobby, also track participants count
-          if (this.role === 'host' || session.current_stage === 'lobby' || session.status === 'lobby') {
+          if (this.role === 'host' || session.current_stage === 'waiting' || session.status === 'lobby') {
             const partRes = await apiClient.get<any[]>(`/participants?session_id=${encodeURIComponent(this.sessionId)}`);
             if (partRes.success && Array.isArray(partRes.data)) {
               if (partRes.data.length !== this.lastPolledParticipantsCount) {
