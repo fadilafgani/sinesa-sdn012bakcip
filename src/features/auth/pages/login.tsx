@@ -286,7 +286,7 @@ export const Login: React.FC = () => {
             className="inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-primary-foreground shadow-lg shadow-primary/10 mb-4 p-2"
           >
             <img 
-              src="https://sekolahanak.com/wp-content/uploads/2025/03/SDN-012-Babakan-Ciparay-logo.webp" 
+              src="/logo-sdn012.png" 
               alt="Logo SDN 012 Babakan Ciparay"
               className="h-16 w-16 object-contain"
             />

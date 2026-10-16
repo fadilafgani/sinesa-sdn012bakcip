@@ -257,7 +257,7 @@ export const TeacherDashboard: React.FC = () => {
         <div className="flex items-center justify-between mb-8 border-b pb-5">
           <div className="flex items-center gap-3">
             <img 
-              src="https://sekolahanak.com/wp-content/uploads/2025/03/SDN-012-Babakan-Ciparay-logo.webp" 
+              src="/logo-sdn012.png" 
               alt="Logo SDN 012 Babakan Ciparay"
               className="h-10 w-10 object-contain rounded-2xl bg-white p-1 shadow shadow-primary/10 border"
             />
