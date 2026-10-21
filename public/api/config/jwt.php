@@ -72,9 +72,10 @@ class JWT {
      *
      * @param string $token Encoded JWT string
      * @param string|null $secret Custom secret key (optional)
+     * @param bool $checkRevocation Check against revoked_tokens table (default true)
      * @return array|null Returns decoded payload array or null if invalid/expired
      */
-    public static function decode(string $token, ?string $secret = null): ?array {
+    public static function decode(string $token, ?string $secret = null, bool $checkRevocation = true): ?array {
         $secret = $secret ?? self::getSecret();
         $parts = explode('.', $token);
 
@@ -105,7 +106,90 @@ class JWT {
             return null; // Token expired
         }
 
+        // Check revocation
+        if ($checkRevocation && self::isTokenRevoked($token)) {
+            return null; // Token has been revoked on logout
+        }
+
         return $payload;
+    }
+
+    /**
+     * Backward-compatible decode alias (used by realtime stream)
+     */
+    public static function decodeToken(string $token): ?array {
+        return self::decode($token);
+    }
+
+    /**
+     * Check if a token has been explicitly revoked
+     */
+    public static function isTokenRevoked(string $token): bool {
+        if (empty($token)) {
+            return false;
+        }
+
+        $tokenHash = hash('sha256', $token);
+
+        try {
+            $pdo = get_db();
+            $stmt = $pdo->prepare("SELECT 1 FROM revoked_tokens WHERE token_hash = :hash LIMIT 1");
+            $stmt->execute([':hash' => $tokenHash]);
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable $e) {
+            error_log('[JWT_REVOCATION_CHECK_ERROR] ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Blacklist / Revoke a JWT token until its natural expiration
+     */
+    public static function revokeToken(string $token, ?string $userId = null): bool {
+        if (empty($token)) {
+            return false;
+        }
+
+        // Decode token without checking revocation to inspect its expiry & claims
+        $payload = self::decode($token, null, false);
+        $expiresAt = null;
+        $type = 'access';
+
+        if ($payload && isset($payload['exp'])) {
+            $expiresAt = date('Y-m-d H:i:s', (int)$payload['exp']);
+            $userId = $userId ?? ($payload['sub'] ?? null);
+            $type = $payload['type'] ?? 'access';
+        } else {
+            // If token cannot be decoded or has no exp, default to 7 days from now
+            $expiresAt = date('Y-m-d H:i:s', time() + 604800);
+        }
+
+        $tokenHash = hash('sha256', $token);
+
+        try {
+            $pdo = get_db();
+            $stmt = $pdo->prepare("
+                INSERT INTO revoked_tokens (token_hash, user_id, token_type, expires_at, created_at)
+                VALUES (:hash, :user_id, :type, :expires_at, NOW())
+                ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)
+            ");
+            $res = $stmt->execute([
+                ':hash'       => $tokenHash,
+                ':user_id'    => $userId,
+                ':type'       => $type,
+                ':expires_at' => $expiresAt,
+            ]);
+
+            // Periodic garbage collection: Clean expired tokens with 5% probability
+            if (mt_rand(1, 20) === 1) {
+                $pdo->exec("DELETE FROM revoked_tokens WHERE expires_at < NOW()");
+            }
+
+            return $res;
+        } catch (Throwable $e) {
+            error_log('[JWT_REVOKE_ERROR] ' . $e->getMessage());
+            return false;
+        }
     }
 
     /**

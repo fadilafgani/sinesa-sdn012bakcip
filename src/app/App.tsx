@@ -13,7 +13,19 @@ const QuizEditor = lazy(() => import('@/features/quiz/pages/quiz-editor').then(m
 const HostSession = lazy(() => import('@/features/session/pages/host-session').then(m => ({ default: m.HostSession })));
 const Analytics = lazy(() => import('@/features/teacher/pages/analytics').then(m => ({ default: m.Analytics })));
 const StudentDashboard = lazy(() => import('@/features/student/pages/dashboard').then(m => ({ default: m.StudentDashboard })));
+const StudentProfile = lazy(() => import('@/features/student/pages/profile').then(m => ({ default: m.StudentProfile })));
 const PlaySession = lazy(() => import('@/features/session/pages/play-session').then(m => ({ default: m.PlaySession })));
+
+// ponytail: Route redirector resolving /profile and /account based on user role
+const ProfileRedirect = () => {
+  const profile = useAuthStore(state => state.profile);
+  if (profile?.role === 'admin') {
+    return <Navigate to="/admin" replace />;
+  } else if (profile?.role === 'teacher') {
+    return <Navigate to="/teacher/dashboard" replace />;
+  }
+  return <Navigate to="/student/profile" replace />;
+};
 
 function App() {
   const { initialize, loading } = useAuthStore();
@@ -96,10 +108,40 @@ function App() {
               }
             />
             <Route
+              path="/student/profile"
+              element={
+                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                  <StudentProfile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/student/settings"
+              element={<Navigate to="/student/profile" replace />}
+            />
+            <Route
               path="/student/play-session"
               element={
                 <ProtectedRoute allowedRoles={['student', 'admin']}>
                   <PlaySession />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Generic Profile & Account Aliases */}
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute allowedRoles={['student', 'teacher', 'admin']}>
+                  <ProfileRedirect />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/account"
+              element={
+                <ProtectedRoute allowedRoles={['student', 'teacher', 'admin']}>
+                  <ProfileRedirect />
                 </ProtectedRoute>
               }
             />

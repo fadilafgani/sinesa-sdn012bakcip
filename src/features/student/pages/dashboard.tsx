@@ -23,7 +23,8 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
-  ZoomIn
+  ZoomIn,
+  User
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
@@ -38,6 +39,13 @@ export const StudentDashboard: React.FC = () => {
   const [pinCode, setPinCode] = useState('');
   const [displayName, setDisplayName] = useState(profile?.full_name || '');
   const [error, setError] = useState<string | null>(null);
+
+  // Sync displayName when profile is updated from profile page
+  useEffect(() => {
+    if (profile?.full_name) {
+      setDisplayName(profile.full_name);
+    }
+  }, [profile?.full_name]);
   
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -336,17 +344,47 @@ export const StudentDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-muted-foreground hidden md:inline">
-              Halo, <span className="text-foreground">{profile?.full_name}</span>
-            </span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Clickable Student Name with avatar */}
+            <button
+              type="button"
+              onClick={() => navigate('/student/profile')}
+              className="group flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-card/70 transition active:scale-95 text-left border border-transparent hover:border-border/50"
+              title="Lihat & Edit Profil Siswa"
+            >
+              <div className="h-7 w-7 rounded-lg overflow-hidden border border-primary/30 bg-primary/10 shrink-0">
+                <img
+                  src={
+                    getSafeMediaUrl(profile?.avatar_url) ||
+                    `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(profile?.full_name || 'student')}`
+                  }
+                  alt={profile?.full_name || 'Avatar'}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+              <span className="hidden md:inline">
+                Halo, <span className="text-foreground group-hover:text-primary transition underline decoration-dashed underline-offset-4">{profile?.full_name}</span>
+              </span>
+            </button>
+
+            {/* Dedicated Profile Button in navbar */}
+            <button
+              type="button"
+              onClick={() => navigate('/student/profile')}
+              className="flex items-center gap-1.5 rounded-xl bg-primary/10 text-primary border border-primary/20 px-3 py-2 text-sm font-semibold transition hover:bg-primary hover:text-primary-foreground shadow-sm active:scale-95"
+              title="Buka Menu Profil"
+            >
+              <User className="h-4 w-4" />
+              <span className="hidden sm:inline">Profil</span>
+            </button>
+
             <ThemeToggle />
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 rounded-xl bg-destructive/10 text-destructive border border-destructive/20 px-4 py-2 text-sm font-semibold transition hover:bg-destructive hover:text-white"
+              className="flex items-center gap-2 rounded-xl bg-destructive/10 text-destructive border border-destructive/20 px-3.5 py-2 text-sm font-semibold transition hover:bg-destructive hover:text-white active:scale-95"
             >
               <LogOut className="h-4 w-4" />
-              Keluar
+              <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>
         </div>

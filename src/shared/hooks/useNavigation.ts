@@ -7,11 +7,19 @@ export const useNavigation = () => {
 
   const goToDashboard = () => {
     if (profile?.role === 'teacher') {
-      navigate('/teacher-dashboard');
+      navigate('/teacher/dashboard');
     } else if (profile?.role === 'admin') {
-      navigate('/admin-dashboard');
+      navigate('/admin');
     } else {
-      navigate('/student-dashboard');
+      navigate('/student/dashboard');
+    }
+  };
+
+  const goToProfile = () => {
+    if (profile?.role === 'student') {
+      navigate('/student/profile');
+    } else {
+      goToDashboard();
     }
   };
 
@@ -22,6 +30,7 @@ export const useNavigation = () => {
   return {
     navigate,
     goToDashboard,
+    goToProfile,
     exitQuiz,
   };
 };

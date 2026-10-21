@@ -263,6 +263,22 @@ CREATE TABLE IF NOT EXISTS `media_files` (
         REFERENCES `profiles` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- -------------------------------------------------------------------------
+-- 9. TABLE: revoked_tokens
+-- Menyimpan token JWT (hash SHA-256) yang telah di-revoke saat logout
+-- Mencegah access token lama tetap digunakan setelah logout
+-- -------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `revoked_tokens` (
+    `token_hash` VARCHAR(64) NOT NULL,
+    `user_id` VARCHAR(36) NULL,
+    `token_type` VARCHAR(20) NOT NULL DEFAULT 'access',
+    `expires_at` DATETIME NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`token_hash`),
+    INDEX `idx_revoked_tokens_expires` (`expires_at`),
+    INDEX `idx_revoked_tokens_user` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =========================================================================
 -- DATABASE TRIGGER: SERVER-SIDE ANSWER GRADING
 -- Otomatis memvalidasi kebenaran opsi & skor di tingkat database

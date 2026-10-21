@@ -19,26 +19,34 @@
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((reg) => {
-              console.log('[SINESA] Service Worker registered:', reg.scope);
-              
-              // Auto-update check
-              reg.onupdatefound = () => {
-                const installingWorker = reg.installing;
-                if (installingWorker) {
-                  installingWorker.onstatechange = () => {
-                    if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                      console.log('[SINESA] New app version available, auto reloading...');
-                      window.location.reload();
-                    }
-                  };
-                }
-              };
-            })
-            .catch((err) => console.error('[SINESA] Service Worker registration failed:', err));
-        });
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
+          });
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+              .then((reg) => {
+                console.log('[SINESA] Service Worker registered:', reg.scope);
+                
+                // Auto-update check
+                reg.onupdatefound = () => {
+                  const installingWorker = reg.installing;
+                  if (installingWorker) {
+                    installingWorker.onstatechange = () => {
+                      if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        console.log('[SINESA] New app version available, auto reloading...');
+                        window.location.reload();
+                      }
+                    };
+                  }
+                };
+              })
+              .catch((err) => console.error('[SINESA] Service Worker registration failed:', err));
+          });
+        }
       }
     </script>
   </body>

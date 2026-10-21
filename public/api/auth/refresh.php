@@ -60,7 +60,8 @@ try {
     // 4. Issue new Access Token (15 mins)
     $newAccessToken = JWT::createAccessToken($user, 900);
 
-    // 5. Rotate Refresh Token (Sliding window renewal)
+    // 5. Rotate Refresh Token (Sliding window renewal with revocation of old token)
+    JWT::revokeToken($refreshToken, $userId);
     $newRefreshToken = JWT::createRefreshToken($userId, 604800);
     JWT::setRefreshTokenCookie($newRefreshToken, 604800);
 
