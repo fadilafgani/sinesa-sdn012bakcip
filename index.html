@@ -6,10 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SINESA - Sistem Nilai Dan Evaluasi Siswa Aktif</title>
     <meta name="description" content="SINESA (Sistem Nilai Dan Evaluasi Siswa Aktif) - Platform kuis interaktif realtime berbasis gamifikasi untuk pembelajaran modern." />
-    <!-- Google Fonts -->
+    <!-- Google Fonts (Non-blocking font loading per Web Vitals / Ponytail) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" media="print" onload="this.media='all'" />
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" />
+    </noscript>
     <link rel="manifest" href="/manifest.json?v=3" />
     <meta name="theme-color" content="#2563eb" />
     <link rel="apple-touch-icon" href="/icon-192.png?v=3" />
@@ -19,32 +23,23 @@
     <script type="module" src="/src/main.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        if (navigator.serviceWorker.controller) {
           navigator.serviceWorker.getRegistrations().then((registrations) => {
             for (const registration of registrations) {
               registration.unregister();
             }
+            if ('caches' in window) {
+              caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n))))
+                .then(() => window.location.reload());
+            } else {
+              window.location.reload();
+            }
           });
         } else {
-          window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js')
-              .then((reg) => {
-                console.log('[SINESA] Service Worker registered:', reg.scope);
-                
-                // Auto-update check
-                reg.onupdatefound = () => {
-                  const installingWorker = reg.installing;
-                  if (installingWorker) {
-                    installingWorker.onstatechange = () => {
-                      if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                        console.log('[SINESA] New app version available, auto reloading...');
-                        window.location.reload();
-                      }
-                    };
-                  }
-                };
-              })
-              .catch((err) => console.error('[SINESA] Service Worker registration failed:', err));
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (const registration of registrations) {
+              registration.unregister();
+            }
           });
         }
       }

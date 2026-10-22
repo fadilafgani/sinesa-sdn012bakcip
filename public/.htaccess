@@ -2,7 +2,11 @@
   RewriteEngine On
   RewriteBase /
 
+  # Prevent Apache mod_dir from issuing 301 redirects for API directory URLs
+  DirectorySlash Off
+
   # Pass Authorization header to PHP
+  CGIPassAuth On
   SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
   RewriteCond %{HTTP:Authorization} ^(.*)
   RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]

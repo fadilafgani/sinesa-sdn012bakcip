@@ -34,6 +34,47 @@ function App() {
     initialize();
   }, [initialize]);
 
+  useEffect(() => {
+    if (!loading && typeof performance !== 'undefined' && performance.mark) {
+      performance.mark('sinesa_initial_render_complete');
+
+      const getMarkTime = (name: string): number => {
+        const entries = performance.getEntriesByName(name, 'mark');
+        return entries.length > 0 ? entries[entries.length - 1].startTime : 0;
+      };
+
+      const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+      const navStart = navEntry ? navEntry.startTime : 0;
+      const mainStart = getMarkTime('sinesa_main_start') || navStart;
+      const recoveryStart = getMarkTime('sinesa_session_recovery_start') || mainStart;
+      const refreshStart = getMarkTime('sinesa_refresh_token_start') || recoveryStart;
+      const refreshEnd = getMarkTime('sinesa_refresh_token_end') || refreshStart;
+      const recoveryEnd = getMarkTime('sinesa_session_recovery_end') || refreshEnd;
+      const profileLoaded = getMarkTime('sinesa_profile_loaded') || recoveryEnd;
+      const renderComplete = getMarkTime('sinesa_initial_render_complete') || performance.now();
+
+      const metrics = {
+        total_first_load_ms: Number((renderComplete - navStart).toFixed(2)),
+        stages: {
+          app_initialization_ms: Number((recoveryStart - navStart).toFixed(2)),
+          session_recovery_ms: Number((recoveryEnd - recoveryStart).toFixed(2)),
+          refresh_token_network_ms: Number((refreshEnd - refreshStart).toFixed(2)),
+          profile_loaded_ms: Number((profileLoaded - recoveryEnd).toFixed(2)),
+          routing_and_first_render_ms: Number((renderComplete - profileLoaded).toFixed(2)),
+        },
+        navigation: {
+          dns_lookup_ms: navEntry ? Number((navEntry.domainLookupEnd - navEntry.domainLookupStart).toFixed(2)) : 0,
+          tcp_connect_ms: navEntry ? Number((navEntry.connectEnd - navEntry.connectStart).toFixed(2)) : 0,
+          ttfb_ms: navEntry ? Number((navEntry.responseStart - navEntry.requestStart).toFixed(2)) : 0,
+          dom_content_loaded_ms: navEntry ? Number((navEntry.domContentLoadedEventEnd - navStart).toFixed(2)) : 0,
+        }
+      };
+
+      (window as any).__SINESA_PERF_METRICS__ = metrics;
+      console.log('[PERF] First Load Timing Report:', metrics);
+    }
+  }, [loading]);
+
   if (loading) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-mesh">

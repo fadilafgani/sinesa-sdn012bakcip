@@ -1,6 +1,6 @@
 Add-Type -AssemblyName System.Drawing
 
-function Generate-From-Attached {
+function New-AttachedIcon {
     param(
         [string]$SrcPath,
         [string]$DestPath,
@@ -39,6 +39,6 @@ function Generate-From-Attached {
 
 $attachedLogo = "C:\Users\Fadil Al Afgani\.gemini\antigravity-ide\brain\670287de-d1e1-4997-ba95-5deaf70d12fa\media__1784464417224.jpg"
 
-Generate-From-Attached -SrcPath $attachedLogo -DestPath "public/icon-192.png" -Size 192
-Generate-From-Attached -SrcPath $attachedLogo -DestPath "public/icon-512.png" -Size 512
-Generate-From-Attached -SrcPath $attachedLogo -DestPath "public/icon-maskable.png" -Size 512 -Maskable $true
+New-AttachedIcon -SrcPath $attachedLogo -DestPath "public/icon-192.png" -Size 192
+New-AttachedIcon -SrcPath $attachedLogo -DestPath "public/icon-512.png" -Size 512
+New-AttachedIcon -SrcPath $attachedLogo -DestPath "public/icon-maskable.png" -Size 512 -Maskable $true

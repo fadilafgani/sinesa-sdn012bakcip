@@ -49,12 +49,29 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://evaluasi-bakcip.test',
+        target: 'http://127.0.0.1',
         changeOrigin: true,
+        headers: {
+          Host: 'evaluasi-bakcip.test',
+        },
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.error('[VITE PROXY ERROR]', err);
+          });
+          proxy.on('proxyReq', (_proxyReq, req, _res) => {
+            console.log('[VITE PROXY REQ]', req.method, req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, req, _res) => {
+            console.log('[VITE PROXY RES]', proxyRes.statusCode, req.url);
+          });
+        }
       },
       '/uploads': {
-        target: 'http://evaluasi-bakcip.test',
+        target: 'http://127.0.0.1',
         changeOrigin: true,
+        headers: {
+          Host: 'evaluasi-bakcip.test',
+        },
       }
     }
   }
