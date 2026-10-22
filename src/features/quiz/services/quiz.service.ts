@@ -6,7 +6,7 @@ import type { Quiz } from '@/types';
 export const QuizService = {
   async getQuizzesByTeacherId(teacherId: string): Promise<ServiceResponse<Quiz[]>> {
     console.log('[SYNC] QuizService.getQuizzesByTeacherId', { teacherId });
-    return cachedSafeCall(`quizzes_teacher_${teacherId}`, 10000, () =>
+    return safeCall(() =>
       apiClient.get<Quiz[]>('/quizzes', { params: { teacher_id: teacherId } })
     );
   },

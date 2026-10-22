@@ -10,7 +10,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { 
   ArrowLeft, Plus, Trash2, Save, Image, Volume2, Type, Sigma, 
-  UploadCloud, ChevronRight, CheckCircle2, Play, Video
+  UploadCloud, CheckCircle2, Play, Video,
+  GripVertical, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -40,6 +41,8 @@ const questionSchema = z.object({
 
 const quizFormSchema = z.object({
   title: z.string().min(3, 'Judul kuis minimal harus 3 karakter'),
+  subject: z.string().optional(),
+  target_class: z.string().optional(),
   description: z.string().optional(),
   opening_text: z.string().optional(),
   closing_text: z.string().optional(),
@@ -106,6 +109,8 @@ export const QuizEditor: React.FC = () => {
     resolver: zodResolver(quizFormSchema) as any,
     defaultValues: {
       title: '',
+      subject: '',
+      target_class: '',
       description: '',
       opening_text: '',
       closing_text: '',
@@ -142,10 +147,33 @@ export const QuizEditor: React.FC = () => {
     }
   });
 
-  const { fields: questionFields, append: appendQuestion, remove: removeQuestion } = useFieldArray({
+  const { fields: questionFields, append: appendQuestion, remove: removeQuestion, move: moveQuestion } = useFieldArray({
     control,
     name: 'questions'
   });
+
+  // Drag and drop & manual question reordering state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const handleReorderQuestion = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || toIndex < 0 || toIndex >= questionFields.length) return;
+    moveQuestion(fromIndex, toIndex);
+
+    // Update active question index accurately
+    setActiveQuestionIndex((currentActive) => {
+      if (currentActive === fromIndex) {
+        return toIndex;
+      }
+      if (fromIndex < currentActive && toIndex >= currentActive) {
+        return currentActive - 1;
+      }
+      if (fromIndex > currentActive && toIndex <= currentActive) {
+        return currentActive + 1;
+      }
+      return currentActive;
+    });
+  };
 
   // Watch values for live rendering
   const watchedQuestions = watch('questions');
@@ -192,6 +220,8 @@ export const QuizEditor: React.FC = () => {
 
           reset({
             title: current.title,
+            subject: current.subject || '',
+            target_class: current.target_class || '',
             description: current.description || '',
             opening_text: current.opening_text || '',
             closing_text: current.closing_text || '',
@@ -259,6 +289,8 @@ export const QuizEditor: React.FC = () => {
 
           reset({
             title: quiz.title,
+            subject: quiz.subject || '',
+            target_class: quiz.target_class || '',
             description: quiz.description || '',
             opening_text: quiz.opening_text || '',
             closing_text: quiz.closing_text || '',
@@ -427,6 +459,8 @@ export const QuizEditor: React.FC = () => {
         id,
         teacher_id: 'mock-uuid-teacher',
         title: values.title,
+        subject: values.subject || '',
+        target_class: values.target_class || '',
         description: values.description || '',
         opening_text: values.opening_text || '',
         closing_text: values.closing_text || '',
@@ -504,6 +538,8 @@ export const QuizEditor: React.FC = () => {
         id,
         teacher_id: user.id,
         title: values.title,
+        subject: values.subject || null,
+        target_class: values.target_class || null,
         description: values.description || null,
         opening_text: values.opening_text || null,
         closing_text: values.closing_text || null,
@@ -532,6 +568,8 @@ export const QuizEditor: React.FC = () => {
         // Update quiz details
         const updateRes = await QuizService.updateQuiz(quizId, {
           title: values.title,
+          subject: values.subject || null,
+          target_class: values.target_class || null,
           description: values.description || null,
           opening_text: values.opening_text || null,
           closing_text: values.closing_text || null,
@@ -741,6 +779,28 @@ export const QuizEditor: React.FC = () => {
                   className="w-full mt-1 rounded-xl border border-border bg-background/50 px-3.5 py-2.5 text-sm outline-none focus:border-primary"
                 />
                  {errors.title && <p className="text-xs text-destructive mt-1 font-medium">{errors.title.message as any}</p>}
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase">Mata Pelajaran</label>
+                <input
+                  type="text"
+                  {...register('subject')}
+                  placeholder="Contoh: Matematika, IPA, dsb."
+                  className="w-full mt-1 rounded-xl border border-border bg-background/50 px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+                />
+                {errors.subject && <p className="text-xs text-destructive mt-1 font-medium">{errors.subject.message as any}</p>}
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-muted-foreground uppercase">Target Kelas</label>
+                <input
+                  type="text"
+                  {...register('target_class')}
+                  placeholder="Contoh: Kelas 4, Kelas 5A, dsb."
+                  className="w-full mt-1 rounded-xl border border-border bg-background/50 px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+                />
+                {errors.target_class && <p className="text-xs text-destructive mt-1 font-medium">{errors.target_class.message as any}</p>}
               </div>
 
               <div>
@@ -1033,23 +1093,100 @@ export const QuizEditor: React.FC = () => {
                 </span>
               </div>
 
-              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                 {questionFields.map((field, idx) => (
-                  <button
+                  <div
                     key={field.id}
-                    type="button"
-                    onClick={() => setActiveQuestionIndex(idx)}
-                    className={`w-full flex items-center justify-between p-3 rounded-2xl border text-left text-xs font-semibold transition ${
+                    data-testid={`question-item-${idx}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData('text/plain', String(idx));
+                      e.dataTransfer.effectAllowed = 'move';
+                      setDraggedIndex(idx);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      if (dragOverIndex !== idx) setDragOverIndex(idx);
+                    }}
+                    onDragLeave={(e) => {
+                      if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+                      if (dragOverIndex === idx) setDragOverIndex(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const rawFrom = e.dataTransfer.getData('text/plain');
+                      const from = draggedIndex !== null ? draggedIndex : parseInt(rawFrom, 10);
+                      if (!isNaN(from) && from !== idx) {
+                        handleReorderQuestion(from, idx);
+                      }
+                      setDraggedIndex(null);
+                      setDragOverIndex(null);
+                    }}
+                    className={`w-full group flex items-center justify-between p-2 rounded-2xl border text-left text-xs font-semibold transition select-none ${
                       activeQuestionIndex === idx
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border bg-background/25 text-muted-foreground hover:bg-muted'
+                        ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                        : 'border-border bg-background/25 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                    } ${
+                      draggedIndex === idx ? 'opacity-40 border-dashed border-primary scale-[0.98]' : ''
+                    } ${
+                      dragOverIndex === idx && draggedIndex !== idx ? 'border-primary ring-2 ring-primary/30 bg-primary/15' : ''
                     }`}
                   >
-                    <span className="truncate pr-2">
-                      {idx + 1}. {watchedQuestions?.[idx]?.question_text || '(Pertanyaan Kosong)'}
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0" />
-                  </button>
+                    {/* Drag Handle */}
+                    <div
+                      data-testid={`drag-handle-${idx}`}
+                      className="cursor-grab active:cursor-grabbing p-1 -ml-0.5 text-muted-foreground/70 group-hover:text-foreground hover:bg-muted rounded-md transition shrink-0"
+                      title="Geser untuk mengubah urutan soal"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </div>
+
+                    {/* Question Title Button */}
+                    <button
+                      type="button"
+                      data-testid={`question-select-btn-${idx}`}
+                      onClick={() => setActiveQuestionIndex(idx)}
+                      className="flex-1 truncate text-left px-2 py-1 outline-none focus:outline-none"
+                      title={`Pilih Soal #${idx + 1}`}
+                    >
+                      <span className="font-bold mr-1">{idx + 1}.</span>
+                      <span>{watchedQuestions?.[idx]?.question_text || '(Pertanyaan Kosong)'}</span>
+                    </button>
+
+                    {/* Reorder Buttons (Naik / Turun) */}
+                    <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      {idx > 0 && (
+                        <button
+                          type="button"
+                          data-testid={`move-up-question-${idx}`}
+                          onClick={() => handleReorderQuestion(idx, idx - 1)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
+                          title="Pindahkan soal ke atas (Naik)"
+                          aria-label="Pindahkan soal ke atas"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {idx < questionFields.length - 1 && (
+                        <button
+                          type="button"
+                          data-testid={`move-down-question-${idx}`}
+                          onClick={() => handleReorderQuestion(idx, idx + 1)}
+                          className="p-1 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition"
+                          title="Pindahkan soal ke bawah (Turun)"
+                          aria-label="Pindahkan soal ke bawah"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
 
@@ -1066,9 +1203,40 @@ export const QuizEditor: React.FC = () => {
 
           {/* Question Editor Details Panel */}
           <div className="lg:col-span-3 space-y-6">
-            <div className="glass-panel p-8 rounded-3xl shadow-sm space-y-6">
-              <div className="flex items-center justify-between border-b pb-4">
-                <h3 className="text-lg font-bold text-foreground">Sunting Soal #{activeQuestionIndex + 1}</h3>
+            <div 
+              key={questionFields[activeQuestionIndex]?.id || `question-panel-${activeQuestionIndex}`}
+              className="glass-panel p-8 rounded-3xl shadow-sm space-y-6"
+            >
+              <div className="flex items-center justify-between border-b pb-4 flex-wrap gap-2">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold text-foreground">Sunting Soal #{activeQuestionIndex + 1}</h3>
+                  <div className="flex items-center gap-1 bg-muted/60 px-2 py-1 rounded-xl border border-border/50 text-xs">
+                    {activeQuestionIndex > 0 && (
+                      <button
+                        type="button"
+                        data-testid="header-move-up-btn"
+                        onClick={() => handleReorderQuestion(activeQuestionIndex, activeQuestionIndex - 1)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground font-semibold transition"
+                        title="Geser soal ini ke atas (Naik)"
+                      >
+                        <ChevronUp className="h-3.5 w-3.5" />
+                        <span>Naik</span>
+                      </button>
+                    )}
+                    {activeQuestionIndex < questionFields.length - 1 && (
+                      <button
+                        type="button"
+                        data-testid="header-move-down-btn"
+                        onClick={() => handleReorderQuestion(activeQuestionIndex, activeQuestionIndex + 1)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground font-semibold transition"
+                        title="Geser soal ini ke bawah (Turun)"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" />
+                        <span>Turun</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => handleDeleteQuestion(activeQuestionIndex)}

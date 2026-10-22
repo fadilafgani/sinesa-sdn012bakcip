@@ -18,6 +18,7 @@ export const QuestionService = {
     );
     if (res.success) {
       clearQueryCache('questions');
+      clearQueryCache('quizzes');
     }
     return res;
   },
@@ -29,6 +30,7 @@ export const QuestionService = {
     );
     if (res.success) {
       clearQueryCache('questions');
+      clearQueryCache('quizzes');
     }
     return res;
   },
@@ -40,6 +42,7 @@ export const QuestionService = {
     );
     if (res.success) {
       clearQueryCache('questions');
+      clearQueryCache('quizzes');
     }
     return res;
   },
@@ -51,6 +54,7 @@ export const QuestionService = {
     );
     if (res.success) {
       clearQueryCache('questions');
+      clearQueryCache('quizzes');
     }
     return res;
   },

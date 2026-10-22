@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS `quizzes` (
     `id` VARCHAR(36) NOT NULL,
     `teacher_id` VARCHAR(36) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
+    `subject` VARCHAR(100) NULL,
+    `target_class` VARCHAR(50) NULL,
     `description` TEXT NULL,
     `opening_text` TEXT NULL,
     `closing_text` TEXT NULL,

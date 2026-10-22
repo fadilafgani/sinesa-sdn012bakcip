@@ -241,11 +241,13 @@ try {
         }
 
         $id           = sanitize_string($input['id'] ?? generate_uuid());
-        $questionType = in_array($input['question_type'] ?? 'multiple_choice', ['multiple_choice', 'true_false', 'multiple_answer', 'matching'], true)
-            ? (string)$input['question_type']
+        $rawQType     = (string)($input['question_type'] ?? 'multiple_choice');
+        $questionType = in_array($rawQType, ['multiple_choice', 'true_false', 'multiple_answer', 'matching'], true)
+            ? $rawQType
             : 'multiple_choice';
-        $mediaType    = in_array($input['media_type'] ?? 'text', ['text', 'image', 'audio', 'video', 'latex'], true)
-            ? (string)$input['media_type']
+        $rawMType     = (string)($input['media_type'] ?? 'text');
+        $mediaType    = in_array($rawMType, ['text', 'image', 'audio', 'video', 'latex'], true)
+            ? $rawMType
             : 'text';
         $mediaUrl     = isset($input['media_url']) && $input['media_url'] !== '' ? sanitize_string((string)$input['media_url']) : null;
         $points       = (int)($input['points'] ?? 100);

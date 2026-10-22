@@ -31,6 +31,8 @@ function format_quiz_row(array $row): array {
         'id'                       => (string)$row['id'],
         'teacher_id'               => (string)$row['teacher_id'],
         'title'                    => (string)$row['title'],
+        'subject'                  => $row['subject'] !== null ? (string)$row['subject'] : '',
+        'target_class'             => $row['target_class'] !== null ? (string)$row['target_class'] : '',
         'description'              => $row['description'] !== null ? (string)$row['description'] : null,
         'opening_text'             => $row['opening_text'] !== null ? (string)$row['opening_text'] : null,
         'closing_text'             => $row['closing_text'] !== null ? (string)$row['closing_text'] : null,
@@ -53,6 +55,8 @@ function format_quiz_row(array $row): array {
         'fullscreen_required'      => (bool)($row['fullscreen_required'] ?? 0),
         'auto_submit_on_violation' => (int)($row['auto_submit_on_violation'] ?? 3),
         'status'                   => (string)($row['status'] ?? 'active'),
+        'total_questions'          => (int)($row['total_questions'] ?? $row['questions_count'] ?? 0),
+        'questions_count'          => (int)($row['total_questions'] ?? $row['questions_count'] ?? 0),
         'created_at'               => (string)$row['created_at'],
         'updated_at'               => (string)$row['updated_at'],
     ];
@@ -84,7 +88,7 @@ try {
 
         // 1. Query by PIN (used by students to join session)
         if ($pinCode !== '') {
-            $stmt = $pdo->prepare("SELECT * FROM quizzes WHERE pin_code = :pin LIMIT 1");
+            $stmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.pin_code = :pin LIMIT 1");
             $stmt->execute([':pin' => $pinCode]);
             $quiz = $stmt->fetch();
 
@@ -112,7 +116,7 @@ try {
 
         // 2. Query single quiz by ID (detail)
         if ($quizId !== '') {
-            $stmt = $pdo->prepare("SELECT * FROM quizzes WHERE id = :id LIMIT 1");
+            $stmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.id = :id LIMIT 1");
             $stmt->execute([':id' => $quizId]);
             $quiz = $stmt->fetch();
 
@@ -131,21 +135,21 @@ try {
         // 3. List quizzes
         if ($userRole === 'teacher') {
             // Teacher ONLY sees quizzes belonging to them
-            $stmt = $pdo->prepare("SELECT * FROM quizzes WHERE teacher_id = :tid ORDER BY created_at DESC");
+            $stmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.teacher_id = :tid ORDER BY q.created_at DESC");
             $stmt->execute([':tid' => $userId]);
             $rows = $stmt->fetchAll();
         } elseif ($userRole === 'admin') {
             // Admin sees all or can filter by teacher_id
             if ($teacherIdParam !== '') {
-                $stmt = $pdo->prepare("SELECT * FROM quizzes WHERE teacher_id = :tid ORDER BY created_at DESC");
+                $stmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.teacher_id = :tid ORDER BY q.created_at DESC");
                 $stmt->execute([':tid' => $teacherIdParam]);
             } else {
-                $stmt = $pdo->query("SELECT * FROM quizzes ORDER BY created_at DESC");
+                $stmt = $pdo->query("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q ORDER BY q.created_at DESC");
             }
             $rows = $stmt->fetchAll();
         } else {
             // Student sees active quizzes
-            $stmt = $pdo->query("SELECT * FROM quizzes WHERE status = 'active' ORDER BY created_at DESC");
+            $stmt = $pdo->query("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.status = 'active' ORDER BY q.created_at DESC");
             $rows = $stmt->fetchAll();
         }
 
@@ -188,6 +192,8 @@ try {
             }
         }
 
+        $subject                = isset($input['subject']) && $input['subject'] !== '' ? sanitize_string((string)$input['subject']) : null;
+        $targetClass            = isset($input['target_class']) && $input['target_class'] !== '' ? sanitize_string((string)$input['target_class']) : null;
         $description            = isset($input['description']) ? (string)$input['description'] : null;
         $openingText            = isset($input['opening_text']) ? (string)$input['opening_text'] : null;
         $closingText            = isset($input['closing_text']) ? (string)$input['closing_text'] : null;
@@ -212,14 +218,14 @@ try {
 
         $insStmt = $pdo->prepare("
             INSERT INTO quizzes (
-                id, teacher_id, title, description, opening_text, closing_text, pin_code,
+                id, teacher_id, title, subject, target_class, description, opening_text, closing_text, pin_code,
                 duration_per_question, random_questions, random_options, thumbnail_url,
                 quiz_mode, lives_count, show_final_result, show_leaderboard, show_correct_answer,
                 show_answer_review, show_question_result, show_explanation, show_score_per_question,
                 show_question_statistics, anti_cheat_enabled, fullscreen_required, auto_submit_on_violation,
                 status, created_at, updated_at
             ) VALUES (
-                :id, :teacher_id, :title, :description, :opening_text, :closing_text, :pin_code,
+                :id, :teacher_id, :title, :subject, :target_class, :description, :opening_text, :closing_text, :pin_code,
                 :duration_per_question, :random_questions, :random_options, :thumbnail_url,
                 :quiz_mode, :lives_count, :show_final_result, :show_leaderboard, :show_correct_answer,
                 :show_answer_review, :show_question_result, :show_explanation, :show_score_per_question,
@@ -232,6 +238,8 @@ try {
             ':id'                       => $id,
             ':teacher_id'               => $teacherId,
             ':title'                    => $title,
+            ':subject'                  => $subject,
+            ':target_class'             => $targetClass,
             ':description'              => $description,
             ':opening_text'             => $openingText,
             ':closing_text'             => $closingText,
@@ -290,7 +298,7 @@ try {
         }
 
         // 1. Fetch current quiz
-        $fetchStmt = $pdo->prepare("SELECT * FROM quizzes WHERE id = :id LIMIT 1");
+        $fetchStmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.id = :id LIMIT 1");
         $fetchStmt->execute([':id' => $quizId]);
         $quiz = $fetchStmt->fetch();
 
@@ -309,6 +317,8 @@ try {
 
         $fieldMappings = [
             'title'                    => 'string',
+            'subject'                  => 'nullable_string',
+            'target_class'             => 'nullable_string',
             'description'              => 'nullable_string',
             'opening_text'             => 'nullable_string',
             'closing_text'             => 'nullable_string',

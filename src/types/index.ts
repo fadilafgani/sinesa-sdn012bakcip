@@ -17,6 +17,8 @@ export interface Quiz {
   id: string;
   teacher_id: string;
   title: string;
+  subject?: string | null;
+  target_class?: string | null;
   description: string | null;
   opening_text: string | null;
   closing_text: string | null;
@@ -41,6 +43,8 @@ export interface Quiz {
   created_at: string;
   updated_at: string;
   status?: 'active' | 'inactive';
+  total_questions?: number;
+  questions_count?: number;
 }
 
 export type QuestionType = 'multiple_choice' | 'true_false' | 'multiple_answer' | 'matching';

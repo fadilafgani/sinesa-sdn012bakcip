@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { QuizService } from '@/features/quiz/services/quiz.service';
-import { AuthService } from '@/features/auth/services/auth.service';
 import type { Quiz } from '@/types';
 import { getSafeMediaUrl } from '@/shared/utils/media';
-import { Plus, Edit2, Play, BarChart2, Trash2, LogOut, BookOpen, Clock, Layers } from 'lucide-react';
+import { Plus, Edit2, Play, BarChart2, Trash2, LogOut, BookOpen, Clock, Layers, GraduationCap } from 'lucide-react';
+import { apiClient } from '@/core/api-client';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '@/shared/utils/swal';
 
@@ -26,6 +26,8 @@ export const TeacherDashboard: React.FC = () => {
         id: 'quiz-mock-1',
         teacher_id: 'mock-uuid-teacher',
         title: 'Kuis Matematika Dasar (Aljabar & LaTeX)',
+        subject: 'Matematika',
+        target_class: 'Kelas 5',
         description: 'Evaluasi pemecahan persamaan matematika, kuadrat, dan rumus-rumus LaTeX.',
         opening_text: null,
         closing_text: null,
@@ -47,6 +49,7 @@ export const TeacherDashboard: React.FC = () => {
         anti_cheat_enabled: false,
         fullscreen_required: false,
         auto_submit_on_violation: 3,
+        total_questions: 2,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
@@ -75,6 +78,7 @@ export const TeacherDashboard: React.FC = () => {
         anti_cheat_enabled: false,
         fullscreen_required: false,
         auto_submit_on_violation: 3,
+        total_questions: 2,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }
@@ -181,17 +185,18 @@ export const TeacherDashboard: React.FC = () => {
     }
 
     try {
-      console.log('TeacherDashboard: fetchQuizzes starting, profile id =', profile?.id);
-      
-      // Auto-refresh token if expired
-      await AuthService.refreshSession();
+      let token = apiClient.getAccessToken();
+      if (!isMock && !token) {
+        token = await apiClient.refreshTokens();
+      }
 
-      if (profile?.id) {
-        const res = await QuizService.getQuizzesByTeacherId(profile.id);
+      const teacherId = profile?.id || useAuthStore.getState().profile?.id;
+
+      if (teacherId && (isMock || token)) {
+        const res = await QuizService.getQuizzesByTeacherId(teacherId);
         if (!res.success) {
           console.error('TeacherDashboard: error fetching quizzes:', res.error);
         } else if (res.data) {
-          console.log('TeacherDashboard: successfully fetched quizzes count =', res.data.length);
           setQuizzes(res.data);
         }
       }
@@ -203,8 +208,7 @@ export const TeacherDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (profile?.id) {
-      console.log('TeacherDashboard: useEffect triggered for fetchQuizzes, location key =', location.key);
+    if (profile?.id || isMock) {
       fetchQuizzes();
     }
   }, [profile?.id, isMock, location.key]);
@@ -328,6 +332,8 @@ export const TeacherDashboard: React.FC = () => {
               {quizzes.map((quiz) => (
                 <div
                   key={quiz.id}
+                  id={`quiz-card-${quiz.id}`}
+                  data-testid="quiz-card"
                   className="glass-panel rounded-3xl overflow-hidden shadow-sm hover:shadow-md hover:scale-[1.01] transition-all duration-300 border flex flex-col justify-between"
                 >
                   <div>
@@ -341,23 +347,72 @@ export const TeacherDashboard: React.FC = () => {
                       <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm text-yellow-300 text-xs font-mono font-bold px-3 py-1 rounded-full border border-white/10">
                         PIN: {quiz.pin_code}
                       </div>
+                      <div
+                        className={`absolute top-3 right-3 text-xs font-bold px-2.5 py-1 rounded-full border backdrop-blur-md flex items-center gap-1 shadow-sm ${
+                          quiz.quiz_mode === 'santai'
+                            ? 'bg-amber-500/90 text-yellow-950 border-amber-300/40'
+                            : 'bg-blue-600/90 text-white border-blue-400/40'
+                        }`}
+                      >
+                        <span>{quiz.quiz_mode === 'santai' ? '🎮' : '🔒'}</span>
+                        <span className="capitalize">{quiz.quiz_mode === 'santai' ? 'Santai' : 'Serius'}</span>
+                      </div>
                     </div>
 
                     {/* Metadata & Title */}
                     <div className="p-5 space-y-3">
-                      <h4 className="font-extrabold text-lg text-foreground line-clamp-1">{quiz.title}</h4>
+                      <div>
+                        <h4 className="font-extrabold text-lg text-foreground line-clamp-1">{quiz.title}</h4>
+                        {(quiz.subject || quiz.target_class) && (
+                          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                            {quiz.subject && (
+                              <span 
+                                data-testid="quiz-card-subject"
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/20"
+                              >
+                                <BookOpen className="h-3 w-3" />
+                                <span>{quiz.subject}</span>
+                              </span>
+                            )}
+                            {quiz.target_class && (
+                              <span 
+                                data-testid="quiz-card-target-class"
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                              >
+                                <GraduationCap className="h-3 w-3" />
+                                <span>{quiz.target_class}</span>
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">
                         {quiz.description || 'Tidak ada deskripsi kuis.'}
                       </p>
 
-                      <div className="flex items-center gap-4 text-xs font-medium text-muted-foreground pt-2">
-                        <span className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-3.5 text-xs font-medium text-muted-foreground pt-2 flex-wrap">
+                        <span className="flex items-center gap-1.5" title="Jumlah Soal">
+                          <BookOpen className="h-3.5 w-3.5 text-primary" />
+                          <span className="font-semibold text-foreground">
+                            {quiz.total_questions ?? quiz.questions_count ?? 0}
+                          </span> Soal
+                        </span>
+                        <span className="flex items-center gap-1.5" title="Durasi Per Soal">
                           <Clock className="h-3.5 w-3.5" />
                           {quiz.duration_per_question}d per soal
                         </span>
-                        <span className="flex items-center gap-1.5">
+                        <span className="flex items-center gap-1.5" title="Urutan Soal">
                           <Layers className="h-3.5 w-3.5" />
                           {quiz.random_questions ? 'Soal Acak' : 'Berurutan'}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                            quiz.quiz_mode === 'santai'
+                              ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400'
+                              : 'bg-primary/10 text-primary border-primary/20'
+                          }`}
+                        >
+                          {quiz.quiz_mode === 'santai' ? '🎮 Santai' : '🔒 Serius'}
                         </span>
                       </div>
                     </div>
