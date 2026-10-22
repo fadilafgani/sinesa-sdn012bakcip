@@ -1,7 +1,7 @@
 <?php
 /**
  * Authentication: Logout Endpoint
- * Revokes session by expiring the HttpOnly refresh token cookie.
+ * Revokes session by invalidating the access token, refresh token, and clearing cookies.
  */
 
 declare(strict_types=1);
@@ -10,6 +10,7 @@ require_once __DIR__ . '/../utils/response.php';
 require_once __DIR__ . '/../utils/request.php';
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../config/jwt.php';
+require_once __DIR__ . '/../middleware/auth.php';
 
 // Handle CORS Preflight
 handle_cors_preflight();
@@ -18,25 +19,34 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     send_error_response('Metode permintaan tidak valid. Gunakan POST.', 405);
 }
 
-// 1. Revoke access token if provided in Authorization header
+// 1. Extract access token from Authorization header or JSON body
 $authHeader = get_bearer_token();
-$auth = get_optional_auth();
-$userId = ($auth && isset($auth['sub'])) ? $auth['sub'] : null;
+$input = get_json_input();
+if (empty($authHeader)) {
+    $authHeader = sanitize_string($input['access_token'] ?? $input['token'] ?? '');
+}
 
+$auth = !empty($authHeader) ? JWT::decode($authHeader, null, false) : null;
+$userId = ($auth && isset($auth['sub'])) ? (string)$auth['sub'] : null;
+
+// 2. Revoke access token if provided
 if (!empty($authHeader)) {
     JWT::revokeToken($authHeader, $userId);
 }
 
-// 2. Revoke refresh token if cookie exists
+// 3. Extract and revoke refresh token if provided via cookie or body
 $cookieRefresh = JWT::getRefreshTokenFromCookie();
+if (empty($cookieRefresh)) {
+    $cookieRefresh = sanitize_string($input['refresh_token'] ?? '');
+}
 if (!empty($cookieRefresh)) {
     JWT::revokeToken($cookieRefresh, $userId);
 }
 
-// 3. Clear HttpOnly refresh token cookie
+// 4. Clear HttpOnly refresh token cookie
 JWT::clearRefreshTokenCookie();
 
-// 4. Optional: Log activity if user provided access token
+// 5. Optional: Log activity if user identified
 if ($userId) {
     try {
         $pdo = get_db();
@@ -51,5 +61,6 @@ if ($userId) {
 }
 
 send_success_response([
-    'message' => 'Berhasil keluar dari sesi.',
+    'message' => 'Berhasil keluar dari sesi dan token dicabut.',
 ]);
+

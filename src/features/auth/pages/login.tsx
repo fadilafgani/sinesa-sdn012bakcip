@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { AuthService } from '@/features/auth/services/auth.service';
 import { SettingsService } from '@/features/settings/services/settings.service';
+import { apiClient } from '@/core/api-client';
 import type { UserRole } from '@/types';
 import { motion } from 'framer-motion';
 import { KeyRound, Mail, User, Shield, GraduationCap, School, AlertCircle, CheckCircle, Download, X } from 'lucide-react';
@@ -96,9 +97,27 @@ export const Login: React.FC = () => {
     checkRegistrationSetting();
   }, [isMock]);
 
-  // Automatically redirect if already logged in
+  // Pre-fill credentials if provided in query params (useful for automated testing)
   useEffect(() => {
-    if (user && profile) {
+    const params = new URLSearchParams(window.location.search);
+    const qEmail = params.get('email');
+    const qPass = params.get('password');
+    const qRole = params.get('role');
+    if (qEmail) setEmail(qEmail);
+    if (qPass) setPassword(qPass);
+    if (qRole) setRole(qRole as UserRole);
+
+    if (params.get('auto_submit') === 'true' && qEmail && qPass) {
+      setTimeout(() => {
+        const form = document.querySelector('form');
+        if (form) form.requestSubmit();
+      }, 300);
+    }
+  }, []);
+
+  // Automatically redirect if already logged in with an active access token
+  useEffect(() => {
+    if (user && profile && (isMock || apiClient.getAccessToken())) {
       if (profile.role === 'admin') {
         navigate('/admin');
       } else if (profile.role === 'teacher') {
@@ -107,7 +126,7 @@ export const Login: React.FC = () => {
         navigate('/student/dashboard');
       }
     }
-  }, [user, profile, navigate]);
+  }, [user, profile, isMock, navigate]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,6 +381,7 @@ export const Login: React.FC = () => {
               <div className="relative">
                 <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  id="login-email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -379,6 +399,7 @@ export const Login: React.FC = () => {
               <div className="relative">
                 <KeyRound className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input
+                  id="login-password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -408,6 +429,7 @@ export const Login: React.FC = () => {
                   Murid
                 </button>
                 <button
+                  id="role-btn-teacher"
                   type="button"
                   onClick={() => setRole('teacher')}
                   className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
@@ -435,6 +457,7 @@ export const Login: React.FC = () => {
             </div>
 
             <button
+              id="login-submit-button"
               type="submit"
               disabled={loading}
               className="w-full mt-6 rounded-2xl bg-primary text-primary-foreground py-3 text-sm font-semibold shadow-lg shadow-primary/25 transition duration-200 hover:bg-primary/95 disabled:opacity-50"

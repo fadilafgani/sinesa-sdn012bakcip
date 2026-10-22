@@ -79,7 +79,8 @@ class Database {
             return self::$instance;
         }
 
-        $host = self::getEnv('DB_HOST', 'localhost');
+        // ponytail: Default to 127.0.0.1 on Windows to bypass IPv6 loopback ::1 2-second timeout
+        $host = self::getEnv('DB_HOST', '127.0.0.1');
         $port = self::getEnv('DB_PORT', '3306');
         $dbName = self::getEnv('DB_NAME', 'sinesa_db');
         $user = self::getEnv('DB_USER', 'root');

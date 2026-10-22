@@ -1443,6 +1443,11 @@ export const AdminDashboard: React.FC = () => {
                                 <tr key={q.id} className="hover:bg-muted/10 transition">
                                   <td className="px-6 py-4 text-left">
                                     <span className="font-bold text-foreground block line-clamp-1">{q.title}</span>
+                                    {(q.subject || q.target_class) && (
+                                      <span className="text-[10px] text-primary font-semibold block truncate max-w-xs">
+                                        {[q.subject, q.target_class].filter(Boolean).join(' • ')}
+                                      </span>
+                                    )}
                                     <span className="text-[10px] text-muted-foreground block truncate max-w-xs">{q.description || 'Tanpa deskripsi'}</span>
                                   </td>
                                   <td className="px-6 py-4 text-left font-semibold text-xs">

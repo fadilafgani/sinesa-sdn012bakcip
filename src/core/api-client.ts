@@ -39,30 +39,23 @@ class ApiClient {
   }
 
   /**
-   * Set the current active access token (kept in memory & localStorage)
+   * Set the current active access token (kept strictly in memory per UAT-013)
    */
   public setAccessToken(token: string | null): void {
     this.accessToken = token;
+    // ponytail: Security hardening (UAT-013) - Purge legacy tokens from web storage
     if (typeof window !== 'undefined') {
       try {
-        if (token) {
-          localStorage.setItem('sinesa_access_token', token);
-        } else {
-          localStorage.removeItem('sinesa_access_token');
-        }
+        localStorage.removeItem('sinesa_access_token');
+        sessionStorage.removeItem('sinesa_access_token');
       } catch {}
     }
   }
 
   /**
-   * Retrieve current active access token
+   * Retrieve current active access token (strictly from memory)
    */
   public getAccessToken(): string | null {
-    if (!this.accessToken && typeof window !== 'undefined') {
-      try {
-        this.accessToken = localStorage.getItem('sinesa_access_token');
-      } catch {}
-    }
     return this.accessToken;
   }
 
@@ -147,10 +140,20 @@ class ApiClient {
   ): Promise<ServiceResponse<T>> {
     const { params, skipAuth = false, _isRetry = false, method, body, headers: customHeaders, ...customInit } = options;
 
+    // ponytail: Prevent Apache directory 301 redirects which strip Authorization headers in Chromium
+    let normalizedEndpoint = endpoint;
+    const directoryEndpoints = ['/quizzes', '/questions', '/sessions', '/participants', '/answers'];
+    for (const dir of directoryEndpoints) {
+      if (normalizedEndpoint === dir || normalizedEndpoint === `${dir}/`) {
+        normalizedEndpoint = `${dir}/index.php`;
+        break;
+      }
+    }
+
     // Build URL with query params
-    let url = endpoint.startsWith('http://') || endpoint.startsWith('https://')
-      ? endpoint
-      : `${this.getBaseUrl()}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    let url = normalizedEndpoint.startsWith('http://') || normalizedEndpoint.startsWith('https://')
+      ? normalizedEndpoint
+      : `${this.getBaseUrl()}${normalizedEndpoint.startsWith('/') ? '' : '/'}${normalizedEndpoint}`;
 
     if (params) {
       const searchParams = new URLSearchParams();
@@ -188,12 +191,22 @@ class ApiClient {
       }
     }
 
-    // Attach Bearer token if available and not skipped
-    if (!skipAuth && this.accessToken && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${this.accessToken}`);
+    const isAuthEndpoint =
+      endpoint.includes('/auth/login') ||
+      endpoint.includes('/auth/refresh') ||
+      endpoint.includes('/auth/register');
+
+    // If a silent token refresh is already in flight, wait for it before sending authenticated requests
+    if (this.isRefreshing && this.refreshPromise && !skipAuth && !isAuthEndpoint) {
+      await this.refreshPromise;
     }
 
-    console.log('API_REQUEST', method.toUpperCase(), url, body || params || '');
+    // Attach Bearer token from memory if available and not skipped
+    if (!skipAuth && this.accessToken) {
+      if (!headers.has('Authorization') || _isRetry) {
+        headers.set('Authorization', `Bearer ${this.accessToken}`);
+      }
+    }
 
     try {
       const res = await fetch(url, {
@@ -205,11 +218,6 @@ class ApiClient {
       });
 
       // Handle 401 Unauthorized with automatic token refresh
-      const isAuthEndpoint =
-        endpoint.includes('/auth/login') ||
-        endpoint.includes('/auth/refresh') ||
-        endpoint.includes('/auth/register');
-
       if (res.status === 401 && !skipAuth && !_isRetry && !isAuthEndpoint) {
         const refreshedToken = await this.refreshTokens();
         if (refreshedToken) {
@@ -277,7 +285,7 @@ class ApiClient {
       };
 
     } catch (networkError: any) {
-      console.error(`[API_CLIENT] Request failed: ${method} ${url}`, networkError);
+      console.error(`[API_CLIENT] Request failed: ${method} ${url}`, networkError, 'cause:', networkError?.cause);
       return {
         success: false,
         data: null,
@@ -308,4 +316,14 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+
+// ponytail: Security hardening (UAT-013) - Purge legacy tokens on module load
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('sinesa_access_token');
+    sessionStorage.removeItem('sinesa_access_token');
+  } catch {}
+}
+
 export default apiClient;
+

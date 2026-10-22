@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useShallow } from 'zustand/shallow';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { usePlayStore } from '@/features/session/stores/play-store';
-import { AuthService } from '@/features/auth/services/auth.service';
 import { QuestionService } from '@/features/question/services/question.service';
 import { AnswerService } from '@/features/answer/services/answer.service';
 import { ParticipantService } from '@/features/participant/services/participant.service';
@@ -178,8 +177,6 @@ export const StudentDashboard: React.FC = () => {
       return;
     }
 
-    // Auto-refresh token if expired
-    await AuthService.refreshSession();
 
     try {
       const partRes = await ParticipantService.getParticipantWithQuizDetails(item.id);
@@ -255,8 +252,6 @@ export const StudentDashboard: React.FC = () => {
 
       setLoadingHistory(true);
       try {
-        // Auto-refresh token if expired
-        await AuthService.refreshSession();
 
         const historyRes = await ParticipantService.getStudentHistory(profile.id);
         const data = historyRes.data;

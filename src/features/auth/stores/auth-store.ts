@@ -67,7 +67,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       // Session recovery via PHP JWT & HttpOnly refresh token cookie
+      if (typeof performance !== 'undefined' && performance.mark) {
+        performance.mark('sinesa_session_recovery_start');
+      }
       const sessionRes = await AuthService.getSession();
+      if (typeof performance !== 'undefined' && performance.mark) {
+        performance.mark('sinesa_session_recovery_end');
+      }
 
       if (sessionRes.success && sessionRes.data?.user) {
         const { user, profile } = sessionRes.data;
@@ -77,8 +83,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           isMock: false,
           loading: false,
         });
+        if (typeof performance !== 'undefined' && performance.mark) {
+          performance.mark('sinesa_profile_loaded');
+        }
       } else {
         set({ user: null, profile: null, isMock: false, loading: false });
+        if (typeof performance !== 'undefined' && performance.mark) {
+          performance.mark('sinesa_profile_loaded');
+        }
       }
     } catch (error) {
       console.error('Error initializing auth:', error);

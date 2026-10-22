@@ -1,11 +1,13 @@
 import { apiClient } from '@/core/api-client';
 import type { ServiceResponse } from '@/shared/services/base.service';
+import { clearQueryCache } from '@/shared/services/base.service';
 import type { Profile } from '@/types';
 import { useAuthStore } from '../stores/auth-store';
 
 export const AuthService = {
   async signIn(email: string, password: string): Promise<ServiceResponse<any>> {
     console.log('[SYNC] AuthService.signIn', { email });
+    clearQueryCache();
     const res = await apiClient.post<any>('/auth/login', { email, password });
 
     if (!res.success || !res.data) {
@@ -85,6 +87,7 @@ export const AuthService = {
 
   async signOut(): Promise<ServiceResponse<void>> {
     console.log('[SYNC] AuthService.signOut');
+    clearQueryCache();
     try {
       await apiClient.post('/auth/logout');
     } catch (err) {
@@ -92,6 +95,7 @@ export const AuthService = {
     } finally {
       apiClient.setAccessToken(null);
       useAuthStore.getState().setUserAndProfile(null, null);
+      clearQueryCache();
     }
 
     return { success: true, data: undefined, error: null };
@@ -118,29 +122,35 @@ export const AuthService = {
     }
 
     // 2. Otherwise (e.g. browser refresh/reload), recover session using secure HttpOnly cookie
-    const refreshRes = await apiClient.post<any>('/auth/refresh');
-    if (refreshRes.success && refreshRes.data?.access_token) {
-      const { access_token, user, profile } = refreshRes.data;
-      apiClient.setAccessToken(access_token);
-
-      return {
-        success: true,
-        data: {
-          session: {
-            access_token,
-            user,
+    if (typeof performance !== 'undefined' && performance.mark) {
+      performance.mark('sinesa_refresh_token_start');
+    }
+    const token = await apiClient.refreshTokens();
+    if (typeof performance !== 'undefined' && performance.mark) {
+      performance.mark('sinesa_refresh_token_end');
+    }
+    if (token) {
+      const meRes = await apiClient.get<any>('/auth/me');
+      if (meRes.success && meRes.data?.user) {
+        return {
+          success: true,
+          data: {
+            session: {
+              access_token: token,
+              user: meRes.data.user,
+            },
+            user: meRes.data.user,
+            profile: meRes.data.profile,
           },
-          user,
-          profile,
-        },
-        error: null,
-      };
+          error: null,
+        };
+      }
     }
 
     return {
       success: false,
       data: null,
-      error: refreshRes.error || 'Tidak ada sesi aktif.',
+      error: 'Tidak ada sesi aktif.',
     };
   },
 

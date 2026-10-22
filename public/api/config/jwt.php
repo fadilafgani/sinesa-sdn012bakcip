@@ -125,6 +125,11 @@ class JWT {
      * Check if a token has been explicitly revoked
      */
     public static function isTokenRevoked(string $token): bool {
+        $token = trim($token);
+        if (stripos($token, 'Bearer ') === 0) {
+            $token = trim(substr($token, 7));
+        }
+
         if (empty($token)) {
             return false;
         }
@@ -146,14 +151,27 @@ class JWT {
      * Blacklist / Revoke a JWT token until its natural expiration
      */
     public static function revokeToken(string $token, ?string $userId = null): bool {
+        $token = trim($token);
+        if (stripos($token, 'Bearer ') === 0) {
+            $token = trim(substr($token, 7));
+        }
+
         if (empty($token)) {
             return false;
         }
 
-        // Decode token without checking revocation to inspect its expiry & claims
+        // Decode token payload to inspect its expiry & claims
         $payload = self::decode($token, null, false);
         $expiresAt = null;
         $type = 'access';
+
+        $parts = explode('.', $token);
+        if (!$payload && count($parts) === 3) {
+            $unverified = json_decode(self::base64UrlDecode($parts[1]), true);
+            if (is_array($unverified)) {
+                $payload = $unverified;
+            }
+        }
 
         if ($payload && isset($payload['exp'])) {
             $expiresAt = date('Y-m-d H:i:s', (int)$payload['exp']);
@@ -202,6 +220,7 @@ class JWT {
             'email' => $userProfile['email'],
             'name'  => $userProfile['full_name'],
             'type'  => 'access',
+            'jti'   => generate_uuid(),
         ];
         return self::encode($payload, $ttl);
     }
@@ -214,6 +233,7 @@ class JWT {
             'sub'   => $userId,
             'type'  => 'refresh',
             'token_version' => 1,
+            'jti'   => generate_uuid(),
         ];
         return self::encode($payload, $ttl);
     }
@@ -247,6 +267,15 @@ class JWT {
         setcookie('sinesa_refresh_token', '', [
             'expires'  => time() - 86400,
             'path'     => '/api/auth',
+            'domain'   => '',
+            'secure'   => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax'
+        ]);
+
+        setcookie('sinesa_refresh_token', '', [
+            'expires'  => time() - 86400,
+            'path'     => '/',
             'domain'   => '',
             'secure'   => $isHttps,
             'httponly' => true,

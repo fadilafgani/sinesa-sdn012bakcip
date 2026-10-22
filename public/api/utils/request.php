@@ -62,11 +62,24 @@ function get_query_param(string $key, $default = null) {
 function get_bearer_token(): ?string {
     $header = null;
 
-    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
-        $header = $_SERVER['HTTP_AUTHORIZATION'];
-    } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-        $header = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    } elseif (function_exists('getallheaders')) {
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_AUTHORIZATION'] as $key) {
+        if (!empty($_SERVER[$key])) {
+            $header = (string)$_SERVER[$key];
+            break;
+        }
+    }
+
+    if (!$header && function_exists('apache_request_headers')) {
+        $apacheHeaders = apache_request_headers();
+        foreach ($apacheHeaders as $k => $v) {
+            if (strtolower((string)$k) === 'authorization') {
+                $header = $v;
+                break;
+            }
+        }
+    }
+
+    if (!$header && function_exists('getallheaders')) {
         $headers = getallheaders();
         foreach ($headers as $k => $v) {
             if (strtolower((string)$k) === 'authorization') {
