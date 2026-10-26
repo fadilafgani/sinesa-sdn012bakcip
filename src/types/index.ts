@@ -57,6 +57,8 @@ export interface Question {
   media_type: 'text' | 'image' | 'audio' | 'video' | 'latex';
   media_url: string | null;
   points: number;
+  duration?: number;
+  timer?: number;
   order_index: number;
   explanation?: string | null;
   created_at: string;

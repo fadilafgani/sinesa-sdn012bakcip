@@ -705,7 +705,7 @@ export const PlaySession: React.FC = () => {
                 <div key={q.id} className="glass-panel p-6 rounded-3xl border border-border/60 space-y-4">
                   <div className="flex items-start justify-between gap-4">
                     <h3 className="font-extrabold text-base text-foreground leading-relaxed">
-                      Soal {idx + 1}. {q.question_text.startsWith('$') ? <LatexRenderer tex={q.question_text} /> : q.question_text}
+                      Soal {idx + 1}. <LatexRenderer content={q.question_text} />
                     </h3>
                     <div className="shrink-0">{badge}</div>
                   </div>
@@ -744,7 +744,7 @@ export const PlaySession: React.FC = () => {
 
                           return (
                             <div key={opt.id} className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-2.5 rounded-xl border text-xs font-semibold ${matchRowStyle}`}>
-                              <span>{opt.option_text}</span>
+                              <span><LatexRenderer content={opt.option_text} /></span>
                               <div className="flex items-center gap-1.5 mt-1 sm:mt-0 text-[11px]">
                                 <span className="text-muted-foreground">Pasangan Anda:</span>
                                 <span className="font-bold">{chosenMatch || '(Belum dipasangkan)'}</span>
@@ -782,7 +782,7 @@ export const PlaySession: React.FC = () => {
                               }`}>
                                 {isSelected ? '✓' : '•'}
                               </div>
-                              <span className="truncate">{opt.option_text}</span>
+                              <span className="truncate"><LatexRenderer content={opt.option_text} /></span>
                             </div>
                           );
                         })}
@@ -794,7 +794,7 @@ export const PlaySession: React.FC = () => {
                   {showExplanationSetting && q.explanation && (
                     <div className="bg-amber-500/5 border border-amber-500/20 p-3.5 rounded-2xl space-y-1">
                       <p className="text-[10px] font-black text-amber-600 uppercase tracking-wider">💡 Pembahasan</p>
-                      <p className="text-xs text-foreground italic font-medium leading-relaxed">{q.explanation}</p>
+                      <div className="text-xs text-foreground italic font-medium leading-relaxed"><LatexRenderer content={q.explanation} /></div>
                     </div>
                   )}
                 </div>
@@ -1176,7 +1176,7 @@ export const PlaySession: React.FC = () => {
       <div className="w-full bg-muted h-2 rounded-full overflow-hidden mb-6">
         <div 
           className="h-full bg-primary transition-all duration-1000 ease-linear"
-          style={{ width: `${(localTimer / (quiz?.duration_per_question || 30)) * 100}%` }}
+          style={{ width: `${Math.min(100, Math.max(0, (localTimer / ((currentQuestion?.duration || (currentQuestion as any)?.timer || quiz?.duration_per_question || 30))) * 100))}%` }}
         />
       </div>
 
@@ -1237,11 +1237,7 @@ export const PlaySession: React.FC = () => {
       {/* Question presentation area */}
       <div className="flex-1 flex flex-col justify-center max-w-3xl mx-auto w-full text-center space-y-6">
         <h2 className="text-xl md:text-2xl font-black text-foreground leading-relaxed">
-          {currentQuestion?.question_text.startsWith('$') ? (
-            <LatexRenderer tex={currentQuestion.question_text} />
-          ) : (
-            currentQuestion?.question_text
-          )}
+          <LatexRenderer content={currentQuestion?.question_text} />
         </h2>
 
         {currentQuestion?.media_url && (
@@ -1402,7 +1398,7 @@ export const PlaySession: React.FC = () => {
                       className="overflow-hidden mt-2"
                     >
                       <div className="bg-muted/50 border border-border/40 p-3 rounded-2xl text-xs text-foreground font-medium leading-relaxed italic max-h-32 overflow-y-auto">
-                        {currentQuestion.explanation}
+                        <LatexRenderer content={currentQuestion.explanation} />
                       </div>
                     </motion.div>
                   )}
@@ -1717,11 +1713,7 @@ export const PlaySession: React.FC = () => {
                     {shapes[idx % 4]}
                   </div>
                   <div className="text-left text-sm md:text-base pr-2 truncate">
-                    {opt.option_text.startsWith('$') ? (
-                      <LatexRenderer tex={opt.option_text} />
-                    ) : (
-                      opt.option_text
-                    )}
+                    <LatexRenderer content={opt.option_text} />
                   </div>
                 </button>
               );

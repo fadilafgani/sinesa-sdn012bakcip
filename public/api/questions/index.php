@@ -34,6 +34,8 @@ function format_question_row(array $row, ?array $options = null): array {
         'media_type'    => (string)($row['media_type'] ?? 'text'),
         'media_url'     => $row['media_url'] !== null ? (string)$row['media_url'] : null,
         'points'        => (int)($row['points'] ?? 100),
+        'duration'      => (int)($row['duration'] ?? 30),
+        'timer'         => (int)($row['duration'] ?? 30),
         'order_index'   => (int)($row['order_index'] ?? 0),
         'explanation'   => $row['explanation'] !== null ? (string)$row['explanation'] : null,
         'created_at'    => (string)$row['created_at'],
@@ -251,16 +253,18 @@ try {
             : 'text';
         $mediaUrl     = isset($input['media_url']) && $input['media_url'] !== '' ? sanitize_string((string)$input['media_url']) : null;
         $points       = (int)($input['points'] ?? 100);
+        $duration     = (int)($input['duration'] ?? ($input['timer'] ?? 30));
+        if ($duration < 5) $duration = 30;
         $orderIndex   = (int)($input['order_index'] ?? 0);
         $explanation  = isset($input['explanation']) && $input['explanation'] !== '' ? sanitize_string((string)$input['explanation']) : null;
 
         $insStmt = $pdo->prepare("
             INSERT INTO questions (
                 id, quiz_id, question_text, question_type, media_type, media_url,
-                points, order_index, explanation, created_at
+                points, duration, order_index, explanation, created_at
             ) VALUES (
                 :id, :quiz_id, :question_text, :question_type, :media_type, :media_url,
-                :points, :order_index, :explanation, NOW()
+                :points, :duration, :order_index, :explanation, NOW()
             )
         ");
 
@@ -272,6 +276,7 @@ try {
             ':media_type'    => $mediaType,
             ':media_url'     => $mediaUrl,
             ':points'        => $points,
+            ':duration'      => $duration,
             ':order_index'   => $orderIndex,
             ':explanation'   => $explanation,
         ]);
@@ -362,9 +367,15 @@ try {
             'media_type'    => 'string',
             'media_url'     => 'nullable_string',
             'points'        => 'int',
+            'duration'      => 'int',
             'order_index'   => 'int',
             'explanation'   => 'nullable_string',
         ];
+
+        // Support timer alias for duration in update payload
+        if (!array_key_exists('duration', $input) && array_key_exists('timer', $input)) {
+            $input['duration'] = $input['timer'];
+        }
 
         foreach ($fields as $col => $type) {
             if (!array_key_exists($col, $input)) continue;

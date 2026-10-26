@@ -11,9 +11,9 @@ import * as z from 'zod';
 import { 
   ArrowLeft, Plus, Trash2, Save, Image, Volume2, Type, Sigma, 
   UploadCloud, CheckCircle2, Play, Video,
-  GripVertical, ChevronUp, ChevronDown
+  GripVertical, ChevronUp, ChevronDown, Clock, Award
 } from 'lucide-react';
-import { LatexRenderer } from '@/shared/components/latex-renderer';
+import { LatexRenderer, hasLatex } from '@/shared/components/latex-renderer';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showError } from '@/shared/utils/swal';
 import { mediaStorageService } from '@/shared/services/media-storage';
@@ -35,6 +35,7 @@ const questionSchema = z.object({
   media_type: z.enum(['text', 'image', 'audio', 'video', 'latex']),
   media_url: z.string().nullable().optional(),
   points: z.coerce.number().min(10).max(10000).default(100),
+  duration: z.coerce.number().min(5, 'Durasi minimal 5 detik').max(300, 'Durasi maksimal 300 detik').default(30),
   explanation: z.string().optional().nullable(),
   options: z.array(optionSchema).min(2, 'Minimal harus ada 2 opsi pilihan').max(6, 'Maksimal 6 opsi pilihan'),
 });
@@ -138,6 +139,7 @@ export const QuizEditor: React.FC = () => {
           media_type: 'text',
           media_url: '',
           points: 100,
+          duration: 30,
           options: [
             { option_text: '', is_correct: true, match_text: '' },
             { option_text: '', is_correct: false, match_text: '' },
@@ -207,7 +209,8 @@ export const QuizEditor: React.FC = () => {
               question_type: (q as any).question_type || 'multiple_choice',
               media_type: q.media_type,
               media_url: q.media_url,
-              points: q.points,
+              points: q.points || 100,
+              duration: q.duration !== undefined ? q.duration : ((q as any).timer !== undefined ? (q as any).timer : (current.duration_per_question || 30)),
               explanation: q.explanation || '',
               options: rawOpts.map(o => ({
                 id: o.id,
@@ -275,7 +278,8 @@ export const QuizEditor: React.FC = () => {
                 question_type: (q as any).question_type || 'multiple_choice',
                 media_type: q.media_type as 'text' | 'image' | 'audio' | 'video' | 'latex',
                 media_url: q.media_url,
-                points: q.points,
+                points: q.points || 100,
+                duration: q.duration !== undefined ? q.duration : ((q as any).timer !== undefined ? (q as any).timer : (quiz.duration_per_question || 30)),
                 explanation: q.explanation || '',
                 options: (rawOpts || []).map(o => ({
                   id: o.id,
@@ -514,6 +518,7 @@ export const QuizEditor: React.FC = () => {
           media_type: q.media_type,
           media_url: q.media_url || null,
           points: q.points,
+          duration: q.duration || (q as any).timer || values.duration_per_question || 30,
           explanation: q.explanation || null,
           order_index: idx,
           created_at: new Date().toISOString()
@@ -616,6 +621,7 @@ export const QuizEditor: React.FC = () => {
           media_type: q.media_type,
           media_url: q.media_url || null,
           points: q.points,
+          duration: q.duration || (q as any).timer || values.duration_per_question || 30,
           explanation: q.explanation || null,
           order_index: i
         });
@@ -649,14 +655,17 @@ export const QuizEditor: React.FC = () => {
   };
 
   const handleAddQuestion = () => {
+    const defaultDuration = watch('duration_per_question') || 30;
     appendQuestion({
       question_text: '',
+      question_type: 'multiple_choice',
       media_type: 'text',
       media_url: '',
       points: 100,
+      duration: defaultDuration,
       options: [
-        { option_text: '', is_correct: true },
-        { option_text: '', is_correct: false },
+        { option_text: '', is_correct: true, match_text: '' },
+        { option_text: '', is_correct: false, match_text: '' },
       ]
     });
     setActiveQuestionIndex(questionFields.length);
@@ -1152,11 +1161,26 @@ export const QuizEditor: React.FC = () => {
                       type="button"
                       data-testid={`question-select-btn-${idx}`}
                       onClick={() => setActiveQuestionIndex(idx)}
-                      className="flex-1 truncate text-left px-2 py-1 outline-none focus:outline-none"
+                      className="flex-1 min-w-0 text-left px-2 py-1 outline-none focus:outline-none flex items-center justify-between gap-1.5"
                       title={`Pilih Soal #${idx + 1}`}
                     >
-                      <span className="font-bold mr-1">{idx + 1}.</span>
-                      <span>{watchedQuestions?.[idx]?.question_text || '(Pertanyaan Kosong)'}</span>
+                      <div className="truncate flex items-center gap-1 min-w-0">
+                        <span className="font-bold shrink-0">{idx + 1}.</span>
+                        <span className="truncate">
+                          {watchedQuestions?.[idx]?.question_text ? (
+                            <LatexRenderer content={watchedQuestions[idx].question_text} />
+                          ) : (
+                            '(Pertanyaan Kosong)'
+                          )}
+                        </span>
+                      </div>
+                      <span 
+                        data-testid={`question-duration-badge-${idx}`}
+                        className="text-[9px] font-black px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0 font-mono"
+                        title={`Durasi: ${watchedQuestions?.[idx]?.duration || watch('duration_per_question') || 30} detik`}
+                      >
+                        {watchedQuestions?.[idx]?.duration || watch('duration_per_question') || 30}s
+                      </span>
                     </button>
 
                     {/* Reorder Buttons (Naik / Turun) */}
@@ -1297,6 +1321,82 @@ export const QuizEditor: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Question Settings: Duration & Points */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-muted/20 border border-border/60 rounded-2xl p-4">
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label 
+                        htmlFor={`question-duration-${activeQuestionIndex}`}
+                        className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1.5"
+                      >
+                        <Clock className="h-3.5 w-3.5 text-primary" />
+                        Durasi per Soal (detik)
+                      </label>
+                      <span className="text-[10px] font-semibold text-primary/80">
+                        Default Global: {watch('duration_per_question') || 30}s
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <input
+                        id={`question-duration-${activeQuestionIndex}`}
+                        type="number"
+                        min={5}
+                        max={300}
+                        step={5}
+                        data-testid={`question-duration-input-${activeQuestionIndex}`}
+                        {...register(`questions.${activeQuestionIndex}.duration`)}
+                        placeholder={`Default: ${watch('duration_per_question') || 30}`}
+                        className="w-full rounded-xl border border-border bg-background/60 px-3.5 py-2.5 text-xs font-bold outline-none focus:border-primary focus:bg-background transition pr-14"
+                      />
+                      <span className="absolute right-3.5 top-2.5 text-xs text-muted-foreground font-bold pointer-events-none">
+                        detik
+                      </span>
+                    </div>
+                    {(errors.questions as any)?.[activeQuestionIndex]?.duration && (
+                      <p className="text-xs text-destructive mt-1 font-medium">
+                        {(errors.questions as any)[activeQuestionIndex]?.duration?.message}
+                      </p>
+                    )}
+                    <span className="text-[9px] text-muted-foreground block mt-1 leading-relaxed font-medium">
+                      Atur batas waktu khusus untuk soal ini (5 - 300 detik). Nilai default otomatis mengacu pada durasi kuis global.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label 
+                      htmlFor={`question-points-${activeQuestionIndex}`}
+                      className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1.5 mb-1.5"
+                    >
+                      <Award className="h-3.5 w-3.5 text-amber-500" />
+                      Poin Soal
+                    </label>
+                    <div className="relative">
+                      <input
+                        id={`question-points-${activeQuestionIndex}`}
+                        type="number"
+                        min={10}
+                        max={10000}
+                        step={10}
+                        data-testid={`question-points-input-${activeQuestionIndex}`}
+                        {...register(`questions.${activeQuestionIndex}.points`)}
+                        placeholder="100"
+                        className="w-full rounded-xl border border-border bg-background/60 px-3.5 py-2.5 text-xs font-bold outline-none focus:border-primary focus:bg-background transition pr-14"
+                      />
+                      <span className="absolute right-3.5 top-2.5 text-xs text-muted-foreground font-bold pointer-events-none">
+                        poin
+                      </span>
+                    </div>
+                    {(errors.questions as any)?.[activeQuestionIndex]?.points && (
+                      <p className="text-xs text-destructive mt-1 font-medium">
+                        {(errors.questions as any)[activeQuestionIndex]?.points?.message}
+                      </p>
+                    )}
+                    <span className="text-[9px] text-muted-foreground block mt-1 leading-relaxed font-medium">
+                      Bobot skor yang diperoleh murid apabila menjawab soal ini dengan benar.
+                    </span>
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-[10px] font-bold text-muted-foreground uppercase">Teks Pertanyaan</label>
                   <textarea
@@ -1309,6 +1409,15 @@ export const QuizEditor: React.FC = () => {
                     <p className="text-xs text-destructive mt-1 font-medium">
                       {(errors.questions as any)[activeQuestionIndex]?.question_text?.message}
                     </p>
+                  )}
+                  {/* Live LaTeX Formula Preview */}
+                  {currentWatchedQuestion?.question_text && hasLatex(currentWatchedQuestion.question_text) && (
+                    <div className="mt-2.5 p-3.5 bg-muted/40 border border-primary/20 rounded-2xl animate-fade-in text-left">
+                      <span className="text-[10px] font-black text-primary uppercase tracking-wider block mb-1">Preview Rumus Matematika (LaTeX):</span>
+                      <div className="text-sm font-semibold text-foreground">
+                        <LatexRenderer content={currentWatchedQuestion.question_text} />
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -1656,13 +1765,21 @@ export const QuizEditor: React.FC = () => {
                               />
                             </div>
                           ) : (
-                            <input
-                              type="text"
-                              disabled={isTrueFalse}
-                              placeholder={`Jawaban Pilihan ${String.fromCharCode(65 + optIdx)}`}
-                              {...register(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)}
-                              className="w-full bg-transparent text-sm font-semibold outline-none border-none text-foreground placeholder:text-muted-foreground disabled:opacity-85"
-                            />
+                            <div className="flex-1 min-w-0">
+                              <input
+                                type="text"
+                                disabled={isTrueFalse}
+                                placeholder={`Jawaban Pilihan ${String.fromCharCode(65 + optIdx)}`}
+                                {...register(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)}
+                                className="w-full bg-transparent text-sm font-semibold outline-none border-none text-foreground placeholder:text-muted-foreground disabled:opacity-85"
+                              />
+                              {watch(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`) && hasLatex(watch(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)) && (
+                                <div className="mt-1 pt-1 border-t border-border/40 text-xs flex items-center gap-1.5 text-primary">
+                                  <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">Preview:</span>
+                                  <LatexRenderer content={watch(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)} />
+                                </div>
+                              )}
+                            </div>
                           )}
 
                           {!isTrueFalse && (
@@ -1690,6 +1807,14 @@ export const QuizEditor: React.FC = () => {
                     rows={3}
                     className="w-full mt-1.5 rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm outline-none focus:border-primary resize-none text-foreground placeholder:text-muted-foreground"
                   />
+                  {currentWatchedQuestion?.explanation && hasLatex(currentWatchedQuestion.explanation) && (
+                    <div className="mt-2 p-3 bg-muted/40 border border-primary/20 rounded-2xl animate-fade-in text-left">
+                      <span className="text-[10px] font-black text-primary uppercase tracking-wider block mb-1">Preview Rumus Pembahasan:</span>
+                      <div className="text-xs font-semibold text-foreground">
+                        <LatexRenderer content={currentWatchedQuestion.explanation} />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
               </div>

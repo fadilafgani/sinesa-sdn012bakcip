@@ -375,7 +375,7 @@ export const sessionActions = {
     const isMock = checkIsMock();
     const now = new Date();
     const quiz = useSessionStore.getState().quiz;
-    const durationSeconds = quiz?.duration_per_question || 30;
+    const durationSeconds = (currentQuestion as any)?.duration || (currentQuestion as any)?.timer || quiz?.duration_per_question || 30;
     const expiresAt = new Date(now.getTime() + durationSeconds * 1000);
 
     const updatedSession: QuizSession = {
@@ -407,7 +407,7 @@ export const sessionActions = {
 
           const isCorrect = pickedOption.is_correct;
           const timeTaken = Math.round(delay);
-          const maxSeconds = useSessionStore.getState().quiz?.duration_per_question || 30;
+          const maxSeconds = (currentQuestion as any)?.duration || (currentQuestion as any)?.timer || useSessionStore.getState().quiz?.duration_per_question || 30;
           const timeRatio = Math.min(timeTaken / (maxSeconds * 1000), 1);
           const scoreAwarded = isCorrect
             ? Math.round(currentQuestion.points * (1 - timeRatio * 0.5))

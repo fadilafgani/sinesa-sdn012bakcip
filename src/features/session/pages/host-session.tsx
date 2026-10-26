@@ -489,11 +489,7 @@ export const HostSession: React.FC = () => {
               Pertanyaan {activeSession!.current_question_index + 1} dari {questions.length}
             </span>
             <h2 className="text-2xl font-black text-foreground mt-1">
-              {currentQuestion.question_text.startsWith('$') ? (
-                <LatexRenderer tex={currentQuestion.question_text} />
-              ) : (
-                currentQuestion.question_text
-              )}
+              <LatexRenderer content={currentQuestion.question_text} />
             </h2>
           </div>
 
@@ -595,7 +591,7 @@ export const HostSession: React.FC = () => {
                     <span className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-black">
                       {idx + 1}
                     </span>
-                    {opt.option_text}
+                    <LatexRenderer content={opt.option_text} />
                   </div>
                   
                   <div className="flex items-center gap-3">
@@ -643,11 +639,7 @@ export const HostSession: React.FC = () => {
                         {alphabet[idx % 4]}
                       </div>
                       <div className="text-base">
-                        {opt.option_text.startsWith('$') ? (
-                          <LatexRenderer tex={opt.option_text} />
-                        ) : (
-                          opt.option_text
-                        )}
+                        <LatexRenderer content={opt.option_text} />
                       </div>
                     </>
                   )}

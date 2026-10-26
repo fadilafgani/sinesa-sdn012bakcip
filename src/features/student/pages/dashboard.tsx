@@ -737,11 +737,7 @@ export const StudentDashboard: React.FC = () => {
 
                                 {/* Question text */}
                                 <div className="text-sm font-semibold text-foreground leading-relaxed">
-                                  {q.question_text.startsWith('$') ? (
-                                    <LatexRenderer tex={q.question_text} />
-                                  ) : (
-                                    q.question_text
-                                  )}
+                                  <LatexRenderer content={q.question_text} />
                                 </div>
 
                                 {/* Question Media */}
@@ -815,11 +811,7 @@ export const StudentDashboard: React.FC = () => {
                                         className={`rounded-xl border p-3.5 text-xs flex items-center justify-between transition-all duration-200 ${optStyle}`}
                                       >
                                         <span className="leading-relaxed">
-                                          {opt.option_text.startsWith('$') ? (
-                                            <LatexRenderer tex={opt.option_text} />
-                                          ) : (
-                                            opt.option_text
-                                          )}
+                                          <LatexRenderer content={opt.option_text} />
                                         </span>
                                         {badgeText && (
                                           <span className="shrink-0 text-[8px] font-black uppercase tracking-wider border border-current px-1.5 py-0.5 rounded ml-2">
@@ -835,7 +827,7 @@ export const StudentDashboard: React.FC = () => {
                                 {showExplanationSetting && q.explanation && (
                                   <div className="bg-amber-500/5 border border-amber-500/20 p-4 rounded-xl space-y-1 mt-3 text-left">
                                     <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider flex items-center gap-1.5">💡 Pembahasan Soal</p>
-                                    <p className="text-xs text-foreground italic font-medium leading-relaxed">{q.explanation}</p>
+                                    <div className="text-xs text-foreground italic font-medium leading-relaxed"><LatexRenderer content={q.explanation} /></div>
                                   </div>
                                 )}
                               </div>

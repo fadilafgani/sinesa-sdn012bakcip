@@ -28,6 +28,7 @@ export const answerActions = {
     const hasAnswered = useAnswerStore.getState().hasAnswered;
 
     if (!participant || !currentQuestion || hasAnswered) return;
+    useAnswerStore.setState({ hasAnswered: true });
 
     const isMock = checkIsMock();
     let isCorrect = false;
@@ -200,6 +201,7 @@ export const answerActions = {
     const questionStartedAt = useAnswerStore.getState().questionStartedAt;
 
     if (!session || !participant || !currentQuestion || hasAnswered) return;
+    useAnswerStore.setState({ hasAnswered: true });
 
     const isMock = checkIsMock();
     let isCorrect = false;

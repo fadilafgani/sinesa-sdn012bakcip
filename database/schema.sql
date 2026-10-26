@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS `questions` (
     `media_type` ENUM('text', 'image', 'audio', 'video', 'latex') NOT NULL DEFAULT 'text',
     `media_url` VARCHAR(500) NULL,
     `points` INT NOT NULL DEFAULT 100,
+    `duration` INT NOT NULL DEFAULT 30,
     `order_index` INT NOT NULL DEFAULT 0,
     `explanation` TEXT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
