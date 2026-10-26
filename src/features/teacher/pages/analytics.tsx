@@ -97,15 +97,26 @@ export const Analytics: React.FC = () => {
       // Online API flow
       try {
         const quizRes = await QuizService.getQuizById(quizId);
+        if (!quizRes.success || !quizRes.data) {
+          const is403 = quizRes.status === 403 || 
+            (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('akses ditolak') || quizRes.error.toLowerCase().includes('tidak memiliki izin') || quizRes.error.toLowerCase().includes('forbidden')));
+          if (is403) {
+            showError('Akses Ditolak', 'Anda tidak memiliki hak untuk melihat analisis kuis ini!');
+          } else {
+            showError('Kuis Tidak Ditemukan', typeof quizRes.error === 'string' ? quizRes.error : 'Kuis tidak ditemukan!');
+          }
+          navigate('/teacher/dashboard');
+          return;
+        }
+
         const quizData = quizRes.data;
 
-        if (quizData) {
-          if (quizData.teacher_id !== profile?.id) {
-            showError('Akses Ditolak', 'Anda tidak memiliki hak untuk melihat analisis kuis ini!');
-            navigate('/teacher/dashboard');
-            return;
-          }
-          setQuiz(quizData as Quiz);
+        if (quizData.teacher_id !== profile?.id) {
+          showError('Akses Ditolak', 'Anda tidak memiliki hak untuk melihat analisis kuis ini!');
+          navigate('/teacher/dashboard');
+          return;
+        }
+        setQuiz(quizData as Quiz);
 
           // Get active or completed sessions for this quiz
           const sessionIdsRes = await SessionService.getQuizSessionIds(quizId);
@@ -169,7 +180,6 @@ export const Analytics: React.FC = () => {
               setQuestionStats(qStats);
             }
           }
-        }
       } catch (err) {
         console.error('Error fetching analytics:', err);
       } finally {

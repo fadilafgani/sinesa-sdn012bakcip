@@ -166,7 +166,9 @@ export const sessionActions = {
 
         const quizRes = await QuizService.getQuizById(quizId);
         const quizData = quizRes.data;
-        if (!quizRes.success || !quizData) throw new Error('Kuis tidak ditemukan.');
+        if (!quizRes.success || !quizData) {
+          throw new Error(typeof quizRes.error === 'string' ? quizRes.error : 'Kuis tidak ditemukan.');
+        }
 
         const existingSessionsRes = await SessionService.getActiveSessionsForQuiz(quizId, user.id);
         const existingSessions = existingSessionsRes.data;
@@ -257,6 +259,7 @@ export const sessionActions = {
 
     creationPromise = performCreate().finally(() => {
       creationPromise = null;
+      useUiStore.setState({ loading: false });
     });
 
     return creationPromise;

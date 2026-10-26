@@ -201,7 +201,7 @@ try {
         $randomQuestions        = !empty($input['random_questions']) ? 1 : 0;
         $randomOptions          = !empty($input['random_options']) ? 1 : 0;
         $thumbnailUrl           = isset($input['thumbnail_url']) && $input['thumbnail_url'] !== '' ? sanitize_string((string)$input['thumbnail_url']) : null;
-        $quizMode               = in_array($input['quiz_mode'] ?? 'serius', ['serius', 'santai'], true) ? (string)$input['quiz_mode'] : 'serius';
+        $quizMode               = in_array($input['quiz_mode'] ?? 'serius', ['serius', 'santai'], true) ? (string)($input['quiz_mode'] ?? 'serius') : 'serius';
         $livesCount             = (int)($input['lives_count'] ?? 3);
         $showFinalResult        = isset($input['show_final_result']) ? (!empty($input['show_final_result']) ? 1 : 0) : 1;
         $showLeaderboard        = isset($input['show_leaderboard']) ? (!empty($input['show_leaderboard']) ? 1 : 0) : 1;

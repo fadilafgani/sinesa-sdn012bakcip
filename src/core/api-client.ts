@@ -231,6 +231,7 @@ class ApiClient {
             success: false,
             data: null,
             error: 'Sesi telah berakhir. Silakan masuk kembali.',
+            status: 401,
           };
         }
       }
@@ -258,6 +259,7 @@ class ApiClient {
           success: false,
           data: null,
           error: errorMessage,
+          status: res.status,
         };
       }
 
@@ -268,12 +270,14 @@ class ApiClient {
             success: false,
             data: null,
             error: resJson.error || 'Terjadi kesalahan pada pemrosesan permintaan.',
+            status: res.status,
           };
         }
         return {
           success: true,
           data: resJson.data !== undefined ? (resJson.data as T) : (null as any),
           error: null,
+          status: res.status,
         };
       }
 
@@ -282,6 +286,7 @@ class ApiClient {
         success: true,
         data: resJson as T,
         error: null,
+        status: res.status,
       };
 
     } catch (networkError: any) {
@@ -290,6 +295,7 @@ class ApiClient {
         success: false,
         data: null,
         error: networkError?.message || 'Gagal terhubung ke server. Periksa koneksi Anda.',
+        status: 0,
       };
     }
   }

@@ -191,7 +191,7 @@ try {
         }
 
         // Normal handler: Create Quiz Session
-        $auth = require_auth();
+        $auth = require_role(['teacher', 'admin']);
         $userId = (string)($auth['sub'] ?? '');
         $userRole = (string)($auth['role'] ?? '');
 
@@ -206,6 +206,11 @@ try {
         $quiz = $qStmt->fetch();
         if (!$quiz) {
             send_error_response('Kuis tidak ditemukan dalam database.', 404);
+        }
+
+        // Ownership enforcement: Teacher can only host their own quiz
+        if ($userRole === 'teacher' && $quiz['teacher_id'] !== $userId) {
+            send_error_response('Akses ditolak. Anda tidak memiliki izin untuk memandu kuis milik guru lain.', 403);
         }
 
         // Host ID: user or overridden by admin
@@ -298,6 +303,14 @@ try {
     // PUT/PATCH: Update Stage, Question, or Status
     // -------------------------------------------------------------------------
     if ($method === 'PUT' || $method === 'PATCH') {
+        $auth = require_auth();
+        $userId = (string)($auth['sub'] ?? '');
+        $userRole = (string)($auth['role'] ?? '');
+
+        if ($userRole === 'student') {
+            send_error_response('Akses ditolak. Siswa tidak memiliki izin untuk mengontrol sesi kuis.', 403);
+        }
+
         $input = get_json_input();
         $id = sanitize_string($_GET['id'] ?? $input['id'] ?? '');
         $action = sanitize_string($_GET['action'] ?? $input['action'] ?? '');
@@ -308,6 +321,16 @@ try {
             if ($quizId === '') {
                 send_error_response('Parameter quiz_id wajib diisi.', 400);
             }
+
+            if ($userRole === 'teacher') {
+                $qStmt = $pdo->prepare("SELECT teacher_id FROM quizzes WHERE id = :qid LIMIT 1");
+                $qStmt->execute([':qid' => $quizId]);
+                $qz = $qStmt->fetch();
+                if ($qz && $qz['teacher_id'] !== $userId) {
+                    send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakhiri sesi kuis milik guru lain.', 403);
+                }
+            }
+
             $now = date('Y-m-d H:i:s');
             $stmt = $pdo->prepare("
                 UPDATE quiz_sessions 
@@ -348,6 +371,10 @@ try {
         $existing = $checkStmt->fetch();
         if (!$existing) {
             send_error_response('Sesi kuis tidak ditemukan.', 404);
+        }
+
+        if ($userRole === 'teacher' && $existing['host_id'] !== $userId) {
+            send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengontrol sesi kuis ini.', 403);
         }
 
         // Build dynamic fields to update
@@ -426,16 +453,38 @@ try {
     // DELETE: Terminate or Delete Session
     // -------------------------------------------------------------------------
     if ($method === 'DELETE') {
+        $auth = require_auth();
+        $userId = (string)($auth['sub'] ?? '');
+        $userRole = (string)($auth['role'] ?? '');
+
+        if ($userRole === 'student') {
+            send_error_response('Akses ditolak. Siswa tidak memiliki izin untuk menghapus atau mengakhiri sesi kuis.', 403);
+        }
+
         $id = sanitize_string($_GET['id'] ?? '');
         $quizId = sanitize_string($_GET['quiz_id'] ?? '');
 
         if ($id !== '') {
+            $checkStmt = $pdo->prepare("SELECT host_id FROM quiz_sessions WHERE id = :id LIMIT 1");
+            $checkStmt->execute([':id' => $id]);
+            $existing = $checkStmt->fetch();
+            if ($existing && $userRole === 'teacher' && $existing['host_id'] !== $userId) {
+                send_error_response('Akses ditolak. Anda tidak memiliki izin untuk menghapus sesi kuis milik guru lain.', 403);
+            }
+
             $stmt = $pdo->prepare("DELETE FROM quiz_sessions WHERE id = :id");
             $stmt->execute([':id' => $id]);
             send_success_response(['id' => $id, 'deleted' => true]);
         }
 
         if ($quizId !== '') {
+            $qStmt = $pdo->prepare("SELECT teacher_id FROM quizzes WHERE id = :qid LIMIT 1");
+            $qStmt->execute([':qid' => $quizId]);
+            $qz = $qStmt->fetch();
+            if ($qz && $userRole === 'teacher' && $qz['teacher_id'] !== $userId) {
+                send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakhiri sesi kuis milik guru lain.', 403);
+            }
+
             $now = date('Y-m-d H:i:s');
             $stmt = $pdo->prepare("
                 UPDATE quiz_sessions 

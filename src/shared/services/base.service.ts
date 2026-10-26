@@ -4,6 +4,7 @@ export interface ServiceResponse<T> {
   success: boolean;
   data: T | null;
   error: any;
+  status?: number;
 }
 
 function getCallerInfo(): { serviceName: string; methodName: string } {
@@ -54,16 +55,16 @@ export const safeCall = async <T>(
     
     if (res && typeof res === 'object' && 'error' in res && res.error) {
       Logger.error(`${caller.serviceName}.${caller.methodName} failed`, res.error);
-      return { success: false, data: null, error: res.error };
+      return { success: false, data: null, error: res.error, status: (res as any)?.status };
     }
     
     const data = (res && typeof res === 'object' && 'data' in res ? res.data : res) as T;
     Logger.perf(`${caller.serviceName}.${caller.methodName} success`, duration);
-    return { success: true, data, error: null };
-  } catch (err) {
+    return { success: true, data, error: null, status: (res as any)?.status ?? 200 };
+  } catch (err: any) {
     const duration = performance.now() - start;
     Logger.error(`${caller.serviceName}.${caller.methodName} threw exception after ${duration.toFixed(1)}ms`, err);
-    return { success: false, data: null, error: err };
+    return { success: false, data: null, error: err, status: err?.status };
   }
 };
 

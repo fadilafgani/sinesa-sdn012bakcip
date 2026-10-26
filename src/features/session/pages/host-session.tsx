@@ -13,7 +13,7 @@ import { sessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
-import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check } from 'lucide-react';
+import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check, ShieldAlert, AlertTriangle, FileQuestion } from 'lucide-react';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showConfirm, showError } from '@/shared/utils/swal';
@@ -91,6 +91,12 @@ export const HostSession: React.FC = () => {
   // Diagnostics State
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [lastPollTime, setLastPollTime] = useState<string>('Never');
+  const [initError, setInitError] = useState<{
+    type: 'access_denied' | 'not_found' | 'error';
+    title: string;
+    message: string;
+    statusCode?: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!activeSession?.id || isMock) return;
@@ -103,33 +109,77 @@ export const HostSession: React.FC = () => {
   // Initialize Session
   useEffect(() => {
     const init = async () => {
-      if (!quizId) return;
+      setInitError(null);
+      if (!quizId) {
+        setInitError({
+          type: 'not_found',
+          title: 'Kuis Tidak Ditemukan',
+          message: 'Parameter ID kuis tidak ditemukan pada tautan.',
+          statusCode: 400
+        });
+        return;
+      }
 
       // Load and verify quiz ownership
       if (isMock) {
         const allQuizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
         const targetQuiz = allQuizzes.find((q: any) => q.id === quizId);
-        if (targetQuiz) {
-          if (targetQuiz.teacher_id !== profile?.id) {
-            showError('Akses Ditolak', 'Anda tidak memiliki hak untuk memandu kuis ini!');
-            navigate('/teacher/dashboard');
-            return;
-          }
+        if (!targetQuiz) {
+          setInitError({
+            type: 'not_found',
+            title: 'Kuis Tidak Ditemukan',
+            message: 'Kuis mock tidak ditemukan dalam database.',
+            statusCode: 404
+          });
+          return;
+        }
+        if (targetQuiz.teacher_id !== profile?.id) {
+          setInitError({
+            type: 'access_denied',
+            title: 'Akses Ditolak',
+            message: 'Anda tidak memiliki hak untuk memandu kuis milik guru lain!',
+            statusCode: 403
+          });
+          return;
         }
       } else {
         try {
           await AuthService.refreshSession();
           const quizRes = await QuizService.getQuizById(quizId);
-          const quizData = quizRes.data;
-          if (quizData) {
-            if (quizData.teacher_id !== profile?.id) {
-              showError('Akses Ditolak', 'Anda tidak memiliki hak untuk memandu kuis ini!');
-              navigate('/teacher/dashboard');
-              return;
-            }
+          if (!quizRes.success || !quizRes.data) {
+            const is403 = quizRes.status === 403 || 
+              (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('akses ditolak') || quizRes.error.toLowerCase().includes('tidak memiliki izin') || quizRes.error.toLowerCase().includes('forbidden')));
+            const is404 = quizRes.status === 404 || 
+              (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('tidak ditemukan') || quizRes.error.toLowerCase().includes('not found')));
+
+            setInitError({
+              type: is403 ? 'access_denied' : (is404 ? 'not_found' : 'error'),
+              title: is403 ? 'Akses Ditolak' : (is404 ? 'Kuis Tidak Ditemukan' : 'Gagal Memuat Kuis'),
+              message: typeof quizRes.error === 'string' ? quizRes.error : (is403 ? 'Anda tidak memiliki hak untuk memandu kuis ini.' : 'Terjadi kesalahan saat memverifikasi kuis.'),
+              statusCode: quizRes.status || (is403 ? 403 : (is404 ? 404 : 500))
+            });
+            return;
           }
-        } catch (err) {
+
+          const quizData = quizRes.data;
+          if (quizData.teacher_id !== profile?.id) {
+            setInitError({
+              type: 'access_denied',
+              title: 'Akses Ditolak',
+              message: 'Anda tidak memiliki hak untuk memandu kuis milik guru lain!',
+              statusCode: 403
+            });
+            return;
+          }
+        } catch (err: any) {
           console.error('Error verifying quiz ownership:', err);
+          setInitError({
+            type: 'error',
+            title: 'Kesalahan Sistem',
+            message: err?.message || 'Gagal memverifikasi hak akses kuis.',
+            statusCode: 500
+          });
+          return;
         }
       }
 
@@ -159,6 +209,15 @@ export const HostSession: React.FC = () => {
         setPinCode(generatedPin);
       } else {
         console.error('HostSession: Failed to initialize session (createSession returned null)');
+        const curSession = sessionStore.getState().activeSession;
+        if (!curSession) {
+          setInitError({
+            type: 'error',
+            title: 'Gagal Membuka Sesi',
+            message: 'Tidak dapat memulai atau menghubungkan ke sesi kuis. Pastikan server aktif dan Anda memiliki hak akses.',
+            statusCode: 500
+          });
+        }
       }
     };
     init();
@@ -171,18 +230,36 @@ export const HostSession: React.FC = () => {
 
   // Auto-reload questions if they are empty (handles replica lag from editor)
   useEffect(() => {
-    if (activeSession && questions.length === 0 && quizId) {
+    if (activeSession && questions.length === 0 && quizId && !initError) {
       console.log('HostSession: Questions are empty. Starting background check...');
+      let attempts = 0;
+      const maxAttempts = 5;
       const interval = setInterval(async () => {
-        const fetched = await fetchQuestions(quizId);
-        if (fetched && fetched.length > 0) {
-          console.log('HostSession: Successfully fetched questions in background. Count =', fetched.length);
-          clearInterval(interval);
+        attempts++;
+        try {
+          const fetched = await fetchQuestions(quizId);
+          if (fetched && fetched.length > 0) {
+            console.log('HostSession: Successfully fetched questions in background. Count =', fetched.length);
+            clearInterval(interval);
+          } else if (attempts >= maxAttempts) {
+            console.warn('HostSession: Reached max attempts fetching questions');
+            clearInterval(interval);
+            setInitError({
+              type: 'error',
+              title: 'Soal Kuis Kosong',
+              message: 'Kuis ini belum memiliki soal atau gagal dimuat setelah beberapa percobaan.',
+              statusCode: 404
+            });
+          }
+        } catch (e) {
+          if (attempts >= maxAttempts) {
+            clearInterval(interval);
+          }
         }
       }, 1500);
       return () => clearInterval(interval);
     }
-  }, [activeSession?.id, questions.length, quizId]);
+  }, [activeSession?.id, questions.length, quizId, initError]);
 
   // Load initial data once and subscribe to Realtime updates
   useEffect(() => {
@@ -913,10 +990,49 @@ export const HostSession: React.FC = () => {
           </div>
         </div>
 
-        {(() => { console.log('[SYNC] HostSession: Render with stage =', activeSession?.current_stage, 'questionIdx =', activeSession?.current_question_index); return null; })()}
-        {activeSession === null || questions.length === 0 ? (
-          <div className="text-center p-12 text-muted-foreground text-sm font-medium">
-            Memuat sesi kuis...
+        {initError ? (
+          <div className="flex flex-col items-center justify-center p-8 max-w-lg mx-auto text-center animate-fade-in my-12">
+            <div className={`h-20 w-20 rounded-3xl flex items-center justify-center mb-6 shadow-xl ${
+              initError.type === 'access_denied' 
+                ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 shadow-rose-500/5' 
+                : initError.type === 'not_found'
+                ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-amber-500/5'
+                : 'bg-destructive/10 text-destructive border border-destructive/20 shadow-destructive/5'
+            }`}>
+              {initError.type === 'access_denied' ? (
+                <ShieldAlert className="h-10 w-10 animate-bounce" />
+              ) : initError.type === 'not_found' ? (
+                <FileQuestion className="h-10 w-10 animate-pulse" />
+              ) : (
+                <AlertTriangle className="h-10 w-10 animate-pulse" />
+              )}
+            </div>
+            
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 tracking-wide uppercase bg-muted text-muted-foreground border border-border">
+              HTTP {initError.statusCode || (initError.type === 'access_denied' ? 403 : (initError.type === 'not_found' ? 404 : 500))}
+            </div>
+
+            <h2 className="text-2xl font-black text-foreground mb-2">
+              {initError.title}
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-md">
+              {initError.message}
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+              <button
+                type="button"
+                onClick={() => navigate('/teacher/dashboard')}
+                className="w-full py-3.5 px-5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition shadow-lg shadow-primary/20"
+              >
+                Kembali ke Dashboard
+              </button>
+            </div>
+          </div>
+        ) : activeSession === null || questions.length === 0 ? (
+          <div className="text-center p-12 text-muted-foreground text-sm font-medium flex flex-col items-center justify-center gap-4">
+            <div className="h-8 w-8 animate-spin border-4 border-primary border-t-transparent rounded-full" />
+            <span>Memuat sesi kuis...</span>
           </div>
         ) : activeSession.current_stage === 'waiting' ? (
           renderLobby()

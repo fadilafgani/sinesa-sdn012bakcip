@@ -11,7 +11,8 @@ import * as z from 'zod';
 import { 
   ArrowLeft, Plus, Trash2, Save, Image, Volume2, Type, Sigma, 
   UploadCloud, CheckCircle2, Play, Video,
-  GripVertical, ChevronUp, ChevronDown, Clock, Award
+  GripVertical, ChevronUp, ChevronDown, Clock, Award,
+  ShieldAlert, FileQuestion, AlertTriangle
 } from 'lucide-react';
 import { LatexRenderer, hasLatex } from '@/shared/components/latex-renderer';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -97,6 +98,12 @@ export const QuizEditor: React.FC = () => {
   const isNew = searchParams.get('new') === 'true';
 
   const [loading, setLoading] = useState(false);
+  const [pageError, setPageError] = useState<{
+    type: 'access_denied' | 'not_found' | 'error';
+    title: string;
+    message: string;
+    statusCode?: number;
+  } | null>(null);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -184,6 +191,7 @@ export const QuizEditor: React.FC = () => {
   // Fetch or setup quiz
   useEffect(() => {
     const loadQuizData = async () => {
+      setPageError(null);
       if (isNew || !quizId) return;
 
       setLoading(true);
@@ -192,12 +200,27 @@ export const QuizEditor: React.FC = () => {
         const allQuizzes: Quiz[] = JSON.parse(localStorage.getItem('quizzes') || '[]');
         const current = allQuizzes.find(q => q.id === quizId);
         
-        if (current) {
-          if (current.teacher_id !== profile?.id) {
-            showError('Akses Ditolak', 'Anda tidak memiliki hak untuk menyunting kuis ini!');
-            navigate('/teacher/dashboard');
-            return;
-          }
+        if (!current) {
+          setPageError({
+            type: 'not_found',
+            title: 'Kuis Tidak Ditemukan',
+            message: 'Kuis tidak ditemukan dalam penyimpanan lokal.',
+            statusCode: 404,
+          });
+          setLoading(false);
+          return;
+        }
+
+        if (current.teacher_id !== profile?.id) {
+          setPageError({
+            type: 'access_denied',
+            title: 'Akses Ditolak',
+            message: 'Anda tidak memiliki hak untuk menyunting kuis milik guru lain!',
+            statusCode: 403,
+          });
+          setLoading(false);
+          return;
+        }
           const rawQs: Question[] = JSON.parse(localStorage.getItem(`questions_${quizId}`) || '[]');
           
           // Load options for each question
@@ -247,7 +270,6 @@ export const QuizEditor: React.FC = () => {
             auto_submit_on_violation: current.auto_submit_on_violation !== undefined ? current.auto_submit_on_violation : 3,
             questions: formattedQuestions
           });
-        }
         setLoading(false);
         return;
       }
@@ -255,82 +277,106 @@ export const QuizEditor: React.FC = () => {
       // Online API Load
       try {
         const quizRes = await QuizService.getQuizById(quizId);
-        const quiz = quizRes.success ? quizRes.data : null;
+        if (!quizRes.success || !quizRes.data) {
+          const is403 = quizRes.status === 403 || 
+            (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('akses ditolak') || quizRes.error.toLowerCase().includes('tidak memiliki izin') || quizRes.error.toLowerCase().includes('forbidden')));
+          const is404 = quizRes.status === 404 || 
+            (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('tidak ditemukan') || quizRes.error.toLowerCase().includes('not found')));
 
-        if (quiz) {
-          if (quiz.teacher_id !== profile?.id) {
-            showError('Akses Ditolak', 'Anda tidak memiliki hak untuk menyunting kuis ini!');
-            navigate('/teacher/dashboard');
-            return;
-          }
-          const qsRes = await QuestionService.getQuestions(quizId);
-          const rawQs = qsRes.success ? qsRes.data : [];
-
-          const formattedQuestions = [];
-          if (rawQs) {
-            for (const q of rawQs) {
-              const optsRes = await QuestionService.getQuestionOptions(q.id);
-              const rawOpts = optsRes.success ? optsRes.data : [];
-
-              formattedQuestions.push({
-                id: q.id,
-                question_text: q.question_text,
-                question_type: (q as any).question_type || 'multiple_choice',
-                media_type: q.media_type as 'text' | 'image' | 'audio' | 'video' | 'latex',
-                media_url: q.media_url,
-                points: q.points || 100,
-                duration: q.duration !== undefined ? q.duration : ((q as any).timer !== undefined ? (q as any).timer : (quiz.duration_per_question || 30)),
-                explanation: q.explanation || '',
-                options: (rawOpts || []).map(o => ({
-                  id: o.id,
-                  option_text: o.option_text,
-                  is_correct: o.is_correct,
-                  match_text: (o as any).match_text || ''
-                }))
-              });
-            }
-          }
-
-          reset({
-            title: quiz.title,
-            subject: quiz.subject || '',
-            target_class: quiz.target_class || '',
-            description: quiz.description || '',
-            opening_text: quiz.opening_text || '',
-            closing_text: quiz.closing_text || '',
-            duration_per_question: quiz.duration_per_question,
-            random_questions: quiz.random_questions,
-            random_options: quiz.random_options,
-            thumbnail_url: quiz.thumbnail_url || '',
-            quiz_mode: quiz.quiz_mode || 'serius',
-            lives_count: quiz.lives_count !== undefined ? quiz.lives_count : 3,
-            show_final_result: quiz.show_final_result !== undefined ? quiz.show_final_result : true,
-            show_leaderboard: quiz.show_leaderboard !== undefined ? quiz.show_leaderboard : true,
-            show_correct_answer: quiz.show_correct_answer !== undefined ? quiz.show_correct_answer : true,
-            show_answer_review: quiz.show_answer_review !== undefined ? quiz.show_answer_review : true,
-            show_question_result: quiz.show_question_result !== undefined ? quiz.show_question_result : true,
-            show_explanation: quiz.show_explanation !== undefined ? quiz.show_explanation : true,
-            show_score_per_question: quiz.show_score_per_question !== undefined ? quiz.show_score_per_question : true,
-            show_question_statistics: quiz.show_question_statistics !== undefined ? quiz.show_question_statistics : true,
-            anti_cheat_enabled: quiz.anti_cheat_enabled !== undefined ? quiz.anti_cheat_enabled : false,
-            fullscreen_required: quiz.fullscreen_required !== undefined ? quiz.fullscreen_required : false,
-            auto_submit_on_violation: quiz.auto_submit_on_violation !== undefined ? quiz.auto_submit_on_violation : 3,
-            questions: formattedQuestions.length > 0 ? formattedQuestions : [
-              {
-                question_text: '',
-                media_type: 'text',
-                media_url: '',
-                points: 100,
-                options: [
-                  { option_text: '', is_correct: true },
-                  { option_text: '', is_correct: false },
-                ]
-              }
-            ]
+          setPageError({
+            type: is403 ? 'access_denied' : (is404 ? 'not_found' : 'error'),
+            title: is403 ? 'Akses Ditolak' : (is404 ? 'Kuis Tidak Ditemukan' : 'Gagal Memuat Kuis'),
+            message: typeof quizRes.error === 'string' ? quizRes.error : (is403 ? 'Anda tidak memiliki hak akses untuk menyunting kuis ini.' : 'Terjadi kesalahan saat memuat kuis.'),
+            statusCode: quizRes.status || (is403 ? 403 : (is404 ? 404 : 500)),
           });
+          return;
         }
-      } catch (err) {
+
+        const quiz = quizRes.data;
+
+        if (quiz.teacher_id !== profile?.id) {
+          setPageError({
+            type: 'access_denied',
+            title: 'Akses Ditolak',
+            message: 'Anda tidak memiliki hak untuk menyunting kuis milik guru lain!',
+            statusCode: 403,
+          });
+          return;
+        }
+
+        const qsRes = await QuestionService.getQuestions(quizId);
+        const rawQs = qsRes.success ? qsRes.data : [];
+
+        const formattedQuestions = [];
+        if (rawQs) {
+          for (const q of rawQs) {
+            const optsRes = await QuestionService.getQuestionOptions(q.id);
+            const rawOpts = optsRes.success ? optsRes.data : [];
+
+            formattedQuestions.push({
+              id: q.id,
+              question_text: q.question_text,
+              question_type: (q as any).question_type || 'multiple_choice',
+              media_type: q.media_type as 'text' | 'image' | 'audio' | 'video' | 'latex',
+              media_url: q.media_url,
+              points: q.points || 100,
+              duration: q.duration !== undefined ? q.duration : ((q as any).timer !== undefined ? (q as any).timer : (quiz.duration_per_question || 30)),
+              explanation: q.explanation || '',
+              options: (rawOpts || []).map(o => ({
+                id: o.id,
+                option_text: o.option_text,
+                is_correct: o.is_correct,
+                match_text: (o as any).match_text || ''
+              }))
+            });
+          }
+        }
+
+        reset({
+          title: quiz.title,
+          subject: quiz.subject || '',
+          target_class: quiz.target_class || '',
+          description: quiz.description || '',
+          opening_text: quiz.opening_text || '',
+          closing_text: quiz.closing_text || '',
+          duration_per_question: quiz.duration_per_question,
+          random_questions: quiz.random_questions,
+          random_options: quiz.random_options,
+          thumbnail_url: quiz.thumbnail_url || '',
+          quiz_mode: quiz.quiz_mode || 'serius',
+          lives_count: quiz.lives_count !== undefined ? quiz.lives_count : 3,
+          show_final_result: quiz.show_final_result !== undefined ? quiz.show_final_result : true,
+          show_leaderboard: quiz.show_leaderboard !== undefined ? quiz.show_leaderboard : true,
+          show_correct_answer: quiz.show_correct_answer !== undefined ? quiz.show_correct_answer : true,
+          show_answer_review: quiz.show_answer_review !== undefined ? quiz.show_answer_review : true,
+          show_question_result: quiz.show_question_result !== undefined ? quiz.show_question_result : true,
+          show_explanation: quiz.show_explanation !== undefined ? quiz.show_explanation : true,
+          show_score_per_question: quiz.show_score_per_question !== undefined ? quiz.show_score_per_question : true,
+          show_question_statistics: quiz.show_question_statistics !== undefined ? quiz.show_question_statistics : true,
+          anti_cheat_enabled: quiz.anti_cheat_enabled !== undefined ? quiz.anti_cheat_enabled : false,
+          fullscreen_required: quiz.fullscreen_required !== undefined ? quiz.fullscreen_required : false,
+          auto_submit_on_violation: quiz.auto_submit_on_violation !== undefined ? quiz.auto_submit_on_violation : 3,
+          questions: formattedQuestions.length > 0 ? formattedQuestions : [
+            {
+              question_text: '',
+              media_type: 'text',
+              media_url: '',
+              points: 100,
+              options: [
+                { option_text: '', is_correct: true },
+                { option_text: '', is_correct: false },
+              ]
+            }
+          ]
+        });
+      } catch (err: any) {
         console.error('Error loading quiz data:', err);
+        setPageError({
+          type: 'error',
+          title: 'Kesalahan Sistem',
+          message: err?.message || 'Terjadi kesalahan saat memuat kuis.',
+          statusCode: 500,
+        });
       } finally {
         setLoading(false);
       }
@@ -726,6 +772,63 @@ export const QuizEditor: React.FC = () => {
         <div className="text-center space-y-4">
           <div className="h-10 w-10 animate-spin border-4 border-primary border-t-transparent rounded-full mx-auto" />
           <p className="text-sm text-muted-foreground font-medium">Memuat editor kuis...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (pageError) {
+    return (
+      <div className="min-h-screen bg-mesh flex items-center justify-center p-6">
+        <div className="glass-panel p-8 sm:p-10 rounded-3xl w-full max-w-lg text-center space-y-6 shadow-2xl border border-white/20 animate-fade-in">
+          <div className={`h-20 w-20 rounded-full flex items-center justify-center mx-auto border ${
+            pageError.type === 'access_denied'
+              ? 'bg-rose-500/10 text-rose-500 border-rose-500/20 shadow-lg shadow-rose-500/5'
+              : pageError.type === 'not_found'
+              ? 'bg-amber-500/10 text-amber-500 border-amber-500/20 shadow-lg shadow-amber-500/5'
+              : 'bg-destructive/10 text-destructive border-destructive/20 shadow-lg shadow-destructive/5'
+          }`}>
+            {pageError.type === 'access_denied' ? (
+              <ShieldAlert className="h-10 w-10 animate-bounce" />
+            ) : pageError.type === 'not_found' ? (
+              <FileQuestion className="h-10 w-10 animate-pulse" />
+            ) : (
+              <AlertTriangle className="h-10 w-10 animate-pulse" />
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-muted text-muted-foreground border border-border">
+              HTTP {pageError.statusCode || (pageError.type === 'access_denied' ? 403 : (pageError.type === 'not_found' ? 404 : 500))}
+            </div>
+            <h2 className="text-2xl font-black text-foreground">{pageError.title}</h2>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {pageError.message}
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => navigate('/teacher/dashboard')}
+              className="flex-1 rounded-2xl border border-border bg-background hover:bg-muted text-foreground py-3.5 font-bold text-sm transition"
+            >
+              Kembali ke Dashboard
+            </button>
+            {pageError.type !== 'access_denied' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPageError(null);
+                  setLoading(true);
+                  window.location.reload();
+                }}
+                className="flex-1 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground py-3.5 font-bold text-sm transition shadow-lg shadow-primary/20"
+              >
+                Coba Lagi
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
