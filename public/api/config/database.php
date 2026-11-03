@@ -73,8 +73,9 @@ class Database {
 
     /**
      * Get singleton PDO connection instance
+     * @param bool $throwOnError If true, throws PDOException instead of exiting with send_error_response
      */
-    public static function getConnection(): PDO {
+    public static function getConnection(bool $throwOnError = false): PDO {
         if (self::$instance !== null) {
             return self::$instance;
         }
@@ -102,8 +103,18 @@ class Database {
         } catch (PDOException $e) {
             // Log real database error privately
             error_log('[SINESA_DB_ERROR] Connection failed: ' . $e->getMessage());
+            if ($throwOnError) {
+                throw $e;
+            }
             send_error_response('Gagal menghubungkan ke database server.', 500);
         }
+    }
+
+    /**
+     * Reset singleton connection (used when MySQL server has gone away or on retry)
+     */
+    public static function resetConnection(): void {
+        self::$instance = null;
     }
 }
 

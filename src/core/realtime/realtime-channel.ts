@@ -27,8 +27,12 @@ export class RealtimeChannelManager {
   // State management & watchdog timers
   private reconnectTimeout: any = null;
   private heartbeatWatchdog: any = null;
+  private reconnectedTimer: any = null;
+  private sseDisconnectedSince: number = 0;
   private reconnectAttempts = 0;
   private isExplicitDisconnect = false;
+  private lastEventId: string | null = null;
+  private highestQuestionIndex: number = -1;
 
   // Bounded LRU cache for deduplication and race-condition prevention
   private processedEventIds = new Set<string>();
@@ -97,6 +101,7 @@ export class RealtimeChannelManager {
     this.participantId = participantId || null;
     this.isExplicitDisconnect = false;
     this.reconnectAttempts = 0;
+    this.highestQuestionIndex = -1;
 
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', this.handleVisibilityChange);
@@ -111,9 +116,16 @@ export class RealtimeChannelManager {
   private connect() {
     if (this.isExplicitDisconnect || !this.sessionId) return;
 
+    if (this.eventSource) {
+      try {
+        this.eventSource.close();
+      } catch (_) {}
+      this.eventSource = null;
+    }
+
     this.setStatus(this.reconnectAttempts > 0 ? 'RECONNECTING' : 'CONNECTING');
 
-    // Build query params including auth token & participant info
+    // Build query params including auth token, participant info, and Last-Event-ID
     const params = new URLSearchParams();
     params.append('session_id', this.sessionId);
     params.append('role', this.role || 'student');
@@ -126,6 +138,10 @@ export class RealtimeChannelManager {
       params.append('token', token);
     }
 
+    if (this.lastEventId) {
+      params.append('last_event_id', this.lastEventId);
+    }
+
     // Connect directly to stream.php to bypass potential rewrite conflicts
     const url = `/api/realtime/stream.php?${params.toString()}`;
     logRealtime(`Opening native EventSource: ${url}`);
@@ -135,17 +151,36 @@ export class RealtimeChannelManager {
 
       this.eventSource.onopen = () => {
         logRealtime('EventSource connection established');
-        this.setStatus('CONNECTED');
+        const wasReconnecting =
+          this.reconnectAttempts > 0 ||
+          this.status === 'RECONNECTING' ||
+          this.status === 'POLLING_FALLBACK' ||
+          this.status === 'ERROR';
+
         this.reconnectAttempts = 0;
+        this.sseDisconnectedSince = 0;
         this.resetHeartbeatWatchdog();
         // Standby/stop fallback polling when SSE is flowing cleanly
         this.stopAdaptivePolling();
+
+        if (wasReconnecting) {
+          this.setStatus('RECONNECTED');
+          // Immediately sync state to ensure UI is 100% matched with server
+          this.resyncStateNow();
+          // After 2.5s of "Terhubung kembali" confirmation, transition to CONNECTED (hiding toast)
+          if (this.reconnectedTimer) clearTimeout(this.reconnectedTimer);
+          this.reconnectedTimer = setTimeout(() => {
+            if (this.status === 'RECONNECTED') {
+              this.setStatus('CONNECTED');
+            }
+          }, 2500);
+        } else {
+          this.setStatus('CONNECTED');
+        }
       };
 
       this.eventSource.onerror = (err) => {
         if (this.isExplicitDisconnect) return;
-        // Engage fallback polling immediately while connection is disrupted
-        this.startAdaptivePolling();
         console.error('REALTIME_ERROR', {
           role: this.role,
           sessionId: this.sessionId,
@@ -153,13 +188,23 @@ export class RealtimeChannelManager {
           readyState: this.eventSource?.readyState,
         });
         logRealtime('EventSource encountered error or cycle refresh:', err);
-        
-        // Native EventSource auto-reconnects, but if in CLOSED state, schedule manual reconnect
-        if (this.eventSource?.readyState === EventSource.CLOSED) {
-          this.handleReconnect();
-        } else {
-          this.setStatus('RECONNECTING');
+
+        if (!this.sseDisconnectedSince) {
+          this.sseDisconnectedSince = Date.now();
         }
+
+        // Always engage adaptive fallback polling on error so room state remains alive
+        this.startAdaptivePolling();
+
+        // Close stale EventSource to prevent hanging socket accumulation
+        if (this.eventSource) {
+          try {
+            this.eventSource.close();
+          } catch (_) {}
+          this.eventSource = null;
+        }
+
+        this.handleReconnect();
       };
 
       // 1. StageChanged listener
@@ -172,9 +217,24 @@ export class RealtimeChannelManager {
         this.handleEvent('TimerTick', e);
       });
 
+      // 2b. CountdownTick listener
+      this.eventSource.addEventListener('CountdownTick', (e: MessageEvent) => {
+        this.handleEvent('CountdownTick', e);
+      });
+
       // 3. ParticipantJoined listener
       this.eventSource.addEventListener('ParticipantJoined', (e: MessageEvent) => {
         this.handleEvent('ParticipantJoined', e);
+      });
+
+      // 3b. ParticipantLeft listener
+      this.eventSource.addEventListener('ParticipantLeft', (e: MessageEvent) => {
+        this.handleEvent('ParticipantLeft', e);
+      });
+
+      // 3c. ParticipantsSynced listener
+      this.eventSource.addEventListener('ParticipantsSynced', (e: MessageEvent) => {
+        this.handleEvent('ParticipantsSynced', e);
       });
 
       // 4. AnswerSubmitted listener
@@ -231,6 +291,7 @@ export class RealtimeChannelManager {
 
     // 1. Duplicate event protection (check bounded set)
     if (eventId) {
+      this.lastEventId = eventId;
       if (this.processedEventIds.has(eventId)) {
         logRealtime(`Duplicate event ignored: ${eventId} (${eventType})`);
         return;
@@ -275,8 +336,14 @@ export class RealtimeChannelManager {
         }
         if (session) {
           realtimeEvents.emit('SessionUpdated', session);
-          if (typeof session.current_question_index === 'number') {
-            realtimeEvents.emit('QuestionChanged', session.current_question_index);
+          const qIdx = session.current_question_index;
+          if (typeof qIdx === 'number') {
+            if (qIdx >= this.highestQuestionIndex || stage === 'waiting') {
+              this.highestQuestionIndex = Math.max(this.highestQuestionIndex, qIdx);
+              realtimeEvents.emit('QuestionChanged', qIdx);
+            } else {
+              logRealtime(`Ignoring regressive question index in SSE: ${qIdx} < ${this.highestQuestionIndex}`);
+            }
           }
           if (session.question_started_at || session.question_expires_at) {
             realtimeEvents.emit('TimerUpdated', {
@@ -299,10 +366,25 @@ export class RealtimeChannelManager {
         break;
       }
 
+      case 'CountdownTick': {
+        realtimeEvents.emit('CountdownTick', data);
+        break;
+      }
+
       case 'ParticipantJoined': {
         if (data.participant) {
           realtimeEvents.emit('ParticipantJoined', data.participant);
         }
+        break;
+      }
+
+      case 'ParticipantLeft': {
+        realtimeEvents.emit('ParticipantLeft', data.participant || data);
+        break;
+      }
+
+      case 'ParticipantsSynced': {
+        realtimeEvents.emit('ParticipantsSynced', data);
         break;
       }
 
@@ -342,7 +424,10 @@ export class RealtimeChannelManager {
   private handleReconnect() {
     if (this.isExplicitDisconnect || !this.sessionId) return;
 
-    this.setStatus('RECONNECTING');
+    if (this.status !== 'POLLING_FALLBACK' && this.status !== 'RECONNECTED') {
+      this.setStatus('RECONNECTING');
+    }
+
     // Ensure fallback polling is running while SSE is disconnected
     this.startAdaptivePolling();
 
@@ -355,10 +440,11 @@ export class RealtimeChannelManager {
 
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
     }
 
-    // Backoff delay: 1s, 2s, 4s, capped at 8s
-    const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 8000);
+    // Backoff delay: 1.5s, 2.5s, 4s, capped at 6s
+    const delay = Math.min(1500 * Math.pow(1.4, this.reconnectAttempts), 6000);
     this.reconnectAttempts++;
 
     logRealtime(`Scheduling reconnect attempt #${this.reconnectAttempts} in ${delay}ms...`);
@@ -382,6 +468,12 @@ export class RealtimeChannelManager {
         realtimeEvents.emit('SessionUpdated', session);
         if (session.current_stage) {
           realtimeEvents.emit('StageChanged', session.current_stage);
+        }
+        if (typeof session.current_question_index === 'number') {
+          if (session.current_question_index >= this.highestQuestionIndex || session.current_stage === 'waiting') {
+            this.highestQuestionIndex = Math.max(this.highestQuestionIndex, session.current_question_index);
+            realtimeEvents.emit('QuestionChanged', session.current_question_index);
+          }
         }
       }
     } catch (_) {}
@@ -436,6 +528,11 @@ export class RealtimeChannelManager {
       this.reconnectTimeout = null;
     }
 
+    if (this.reconnectedTimer) {
+      clearTimeout(this.reconnectedTimer);
+      this.reconnectedTimer = null;
+    }
+
     if (this.eventSource) {
       try {
         this.eventSource.close();
@@ -443,6 +540,7 @@ export class RealtimeChannelManager {
       this.eventSource = null;
     }
 
+    this.sseDisconnectedSince = 0;
     this.processedEventIds.clear();
     this.lastEventTimestamps.clear();
   }
@@ -452,9 +550,8 @@ export class RealtimeChannelManager {
    * Guarantees stage and question state sync even if SSE is buffered or proxy-blocked by hosting.
    */
   private startAdaptivePolling() {
-    this.stopAdaptivePolling();
+    if (this.pollingInterval) return; // Prevent multiple interval timers accumulating
 
-    // Check state every 1500ms
     this.pollingInterval = setInterval(async () => {
       if (this.isExplicitDisconnect || !this.sessionId || this.isPollingActive) return;
       this.isPollingActive = true;
@@ -463,6 +560,17 @@ export class RealtimeChannelManager {
         const res = await apiClient.get<any>(`/sessions?id=${encodeURIComponent(this.sessionId)}`);
         if (res.success && res.data) {
           const session = res.data;
+
+          // If SSE has been disconnected for > 3.5s and polling is successfully syncing data,
+          // inform user via POLLING_FALLBACK status
+          if (
+            this.sseDisconnectedSince > 0 &&
+            Date.now() - this.sseDisconnectedSince > 3500 &&
+            (this.status === 'RECONNECTING' || this.status === 'ERROR' || this.status === 'CONNECTING')
+          ) {
+            this.setStatus('POLLING_FALLBACK');
+          }
+
           const stageChanged = session.current_stage !== this.lastPolledStage;
           const qIdxChanged = session.current_question_index !== this.lastPolledQuestionIdx;
           const statusChanged = session.status !== this.lastPolledStatus;
@@ -482,7 +590,10 @@ export class RealtimeChannelManager {
               }
             }
             if (typeof session.current_question_index === 'number') {
-              realtimeEvents.emit('QuestionChanged', session.current_question_index);
+              if (session.current_question_index >= this.highestQuestionIndex || session.current_stage === 'waiting') {
+                this.highestQuestionIndex = Math.max(this.highestQuestionIndex, session.current_question_index);
+                realtimeEvents.emit('QuestionChanged', session.current_question_index);
+              }
             }
             if (session.question_started_at || session.question_expires_at) {
               realtimeEvents.emit('TimerUpdated', {
@@ -492,12 +603,17 @@ export class RealtimeChannelManager {
             }
           }
 
-          // In lobby, also track participants count
-          if (this.role === 'host' || session.current_stage === 'waiting' || session.status === 'lobby') {
+          // ponytail: In lobby, only host needs fallback polling for participant counts if SSE is disrupted
+          if (this.role === 'host' && (session.current_stage === 'waiting' || session.status === 'lobby')) {
             const partRes = await apiClient.get<any[]>(`/participants?session_id=${encodeURIComponent(this.sessionId)}`);
             if (partRes.success && Array.isArray(partRes.data)) {
               if (partRes.data.length !== this.lastPolledParticipantsCount) {
                 this.lastPolledParticipantsCount = partRes.data.length;
+                realtimeEvents.emit('ParticipantsSynced', {
+                  session_id: this.sessionId,
+                  participants: partRes.data,
+                  count: partRes.data.length,
+                });
                 partRes.data.forEach(p => {
                   realtimeEvents.emit('ParticipantJoined', p);
                 });
@@ -510,7 +626,7 @@ export class RealtimeChannelManager {
       } finally {
         this.isPollingActive = false;
       }
-    }, 1500);
+    }, 2000);
   }
 
   private stopAdaptivePolling() {

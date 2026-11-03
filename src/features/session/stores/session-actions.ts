@@ -10,10 +10,12 @@ import { ParticipantService } from '@/features/participant/services/participant.
 import { AnswerService } from '@/features/answer/services/answer.service';
 import { QuestionService } from '@/features/question/services/question.service';
 import { AuthService } from '@/features/auth/services/auth.service';
+import { apiClient } from '@/core/api-client';
 import { RealtimeManager } from '@/core/realtime/realtime-manager';
 import { realtimeEvents } from '@/core/realtime/realtime-events';
 import { AnalyticsService } from '@/shared/services/analytics.service';
 import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
+import { LeaderboardService } from '@/features/leaderboard/services/leaderboard.service';
 import type { Participant, QuizSession, Question, Option, Answer, Quiz } from '@/types';
 
 const VIRTUAL_NAMES = ['Budi Santoso', 'Ani Wijaya', 'Dedi Kurniawan', 'Siti Rahma', 'Joko Susilo', 'Rini Astuti'];
@@ -23,9 +25,15 @@ let studentRealtimeUnsubs: (() => void)[] = [];
 let creationPromise: Promise<string | null> | null = null;
 let joinPromise: Promise<boolean> | null = null;
 let activeSessionUpdateSeq = 0;
+let participantsFetchPromises: Record<string, Promise<void>> = {};
 
 const refreshAuth = async () => {
-  await AuthService.refreshSession();
+  // Only refresh if access token exists (guest participants do not have tokens)
+  if (apiClient.getAccessToken()) {
+    try {
+      await AuthService.refreshSession();
+    } catch (_) {}
+  }
 };
 
 async function fetchOptionsById(questionId: string): Promise<Option[]> {
@@ -271,17 +279,56 @@ export const sessionActions = {
 
     console.log('HOST_ACTION', { action: 'startQuiz', sessionId: session.id, targetStage: 'countdown' });
 
+    let questions = useQuestionStore.getState().questions;
+    if (!questions || questions.length === 0) {
+      try {
+        const qRes = await QuestionService.getQuestions(session.quiz_id);
+        if (qRes.success && qRes.data) {
+          questions = qRes.data;
+          useQuestionStore.setState({ questions });
+        }
+      } catch (err) {
+        console.warn('startQuiz: fallback question fetch failed:', err);
+      }
+    }
+
+    const firstQuestion = questions && questions.length > 0 ? questions[0] : null;
+    let firstOptions: Option[] = [];
+    if (firstQuestion) {
+      firstOptions = await fetchOptionsById(firstQuestion.id);
+      useQuestionStore.setState({
+        currentQuestion: firstQuestion,
+        currentOptions: firstOptions,
+        currentQuestionIndex: 0,
+      });
+    }
+
+    const now = new Date();
+    const countdownDuration = 3;
+    const countdownExpires = new Date(now.getTime() + countdownDuration * 1000);
+
     const updated: QuizSession = {
       ...session,
       status: 'active',
       current_stage: 'countdown',
       current_question_index: 0,
+      countdown_started_at: now.toISOString(),
+      countdown_expires_at: countdownExpires.toISOString(),
+      countdown_duration: countdownDuration,
     };
 
     await updateSessionStage(
       session.id,
-      { status: 'active', current_stage: 'countdown', current_question_index: 0 },
-      updated
+      {
+        status: 'active',
+        current_stage: 'countdown',
+        current_question_index: 0,
+        countdown_started_at: now.toISOString(),
+        countdown_expires_at: countdownExpires.toISOString(),
+        countdown_duration: countdownDuration,
+      },
+      updated,
+      firstQuestion ? { currentQuestion: firstQuestion } : undefined
     );
   },
 
@@ -335,10 +382,17 @@ export const sessionActions = {
       options = res.success && res.data ? res.data : [];
     }
 
+    const now = new Date();
+    const countdownDuration = 3;
+    const countdownExpires = new Date(now.getTime() + countdownDuration * 1000);
+
     const updatedSession: QuizSession = {
       ...session,
       current_question_index: nextIndex,
       current_stage: 'countdown',
+      countdown_started_at: now.toISOString(),
+      countdown_expires_at: countdownExpires.toISOString(),
+      countdown_duration: countdownDuration,
     };
 
     useQuestionStore.setState({
@@ -349,7 +403,13 @@ export const sessionActions = {
 
     await updateSessionStage(
       session.id,
-      { current_question_index: nextIndex, current_stage: 'countdown' },
+      {
+        current_question_index: nextIndex,
+        current_stage: 'countdown',
+        countdown_started_at: now.toISOString(),
+        countdown_expires_at: countdownExpires.toISOString(),
+        countdown_duration: countdownDuration,
+      },
       updatedSession
     );
   },
@@ -364,13 +424,53 @@ export const sessionActions = {
       { current_stage: 'leaderboard' },
       updated
     );
+
+    // ponytail: Refresh participant scores and leaderboard for the interim leaderboard screen
+    sessionActions.fetchParticipants(session.id);
+    LeaderboardService.getLeaderboard(session.id).then(res => {
+      if (res.success && res.data) {
+        useLeaderboardStore.setState({ leaderboard: res.data });
+      }
+    });
   },
 
   publishQuestionStage: async () => {
     const session = useSessionStore.getState().activeSession;
-    const currentQuestion = useQuestionStore.getState().currentQuestion;
-    const options = useQuestionStore.getState().currentOptions;
-    if (!session || !currentQuestion) return;
+    if (!session) return;
+
+    let currentQuestion = useQuestionStore.getState().currentQuestion;
+    let options = useQuestionStore.getState().currentOptions;
+
+    // ponytail: Resilience guard: if currentQuestion is not yet populated in store, load it from questions array
+    if (!currentQuestion) {
+      let questions = useQuestionStore.getState().questions;
+      if (!questions || questions.length === 0) {
+        try {
+          const qRes = await QuestionService.getQuestions(session.quiz_id);
+          if (qRes.success && qRes.data) {
+            questions = qRes.data;
+            useQuestionStore.setState({ questions });
+          }
+        } catch (err) {
+          console.warn('publishQuestionStage: questions fetch error:', err);
+        }
+      }
+      const idx = session.current_question_index >= 0 ? session.current_question_index : 0;
+      if (questions && questions[idx]) {
+        currentQuestion = questions[idx];
+        options = await fetchOptionsById(currentQuestion.id);
+        useQuestionStore.setState({
+          currentQuestion,
+          currentOptions: options,
+          currentQuestionIndex: idx,
+        });
+      }
+    }
+
+    if (!currentQuestion) {
+      console.error('publishQuestionStage: aborted because currentQuestion could not be resolved');
+      return;
+    }
 
     console.log('HOST_ACTION', { action: 'publishQuestionStage', sessionId: session.id, questionId: currentQuestion.id });
 
@@ -482,6 +582,17 @@ export const sessionActions = {
       { currentQuestion: null }
     );
 
+    // ponytail: Authoritatively fetch final scores from server before unregistering
+    try {
+      await sessionActions.fetchParticipants(session.id);
+      const lbRes = await LeaderboardService.getLeaderboard(session.id);
+      if (lbRes.success && lbRes.data) {
+        useLeaderboardStore.setState({ leaderboard: lbRes.data });
+      }
+    } catch (e) {
+      console.error('Failed to fetch final scores during endQuiz:', e);
+    }
+
     if (!checkIsMock()) {
       sessionActions.unsubscribeAll();
     }
@@ -524,6 +635,7 @@ export const sessionActions = {
     RealtimeManager.connectAsHost(sessionId);
 
     const unsubJoined = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
+      if (newPart.session_id && newPart.session_id !== sessionId) return;
       const current = useParticipantStore.getState().participants;
       if (current.some(p => p.id === newPart.id)) return;
       console.log('STORE_UPDATED', 'participants_joined', newPart.display_name);
@@ -531,6 +643,7 @@ export const sessionActions = {
     });
 
     const unsubUpdated = realtimeEvents.on('ParticipantUpdated', (updatedPart: Participant) => {
+      if (updatedPart.session_id && updatedPart.session_id !== sessionId) return;
       const current = useParticipantStore.getState().participants;
       console.log('STORE_UPDATED', 'participant_updated', updatedPart.display_name);
       useParticipantStore.setState({
@@ -538,15 +651,28 @@ export const sessionActions = {
       });
     });
 
-    const unsubLeft = realtimeEvents.on('ParticipantLeft', (leftPart: Participant) => {
-      const current = useParticipantStore.getState().participants;
-      console.log('STORE_UPDATED', 'participant_left', leftPart.display_name);
-      useParticipantStore.setState({
-        participants: current.filter(p => p.id !== leftPart.id)
-      });
+    const unsubLeft = realtimeEvents.on('ParticipantLeft', (leftData: any) => {
+      if (leftData.session_id && leftData.session_id !== sessionId) return;
+      if (leftData.id) {
+        const current = useParticipantStore.getState().participants;
+        console.log('STORE_UPDATED', 'participant_left', leftData.id);
+        useParticipantStore.setState({
+          participants: current.filter(p => p.id !== leftData.id)
+        });
+      } else {
+        sessionActions.fetchParticipants(sessionId);
+      }
     });
 
-    hostRealtimeUnsubs.push(unsubJoined, unsubUpdated, unsubLeft);
+    const unsubSynced = realtimeEvents.on('ParticipantsSynced', (syncData: any) => {
+      if (syncData.session_id && syncData.session_id !== sessionId) return;
+      if (Array.isArray(syncData.participants)) {
+        console.log('STORE_UPDATED', 'participants_synced', syncData.participants.length);
+        useParticipantStore.setState({ participants: syncData.participants });
+      }
+    });
+
+    hostRealtimeUnsubs.push(unsubJoined, unsubUpdated, unsubLeft, unsubSynced);
   },
 
   subscribeToAnswers: (sessionId: string) => {
@@ -615,15 +741,40 @@ export const sessionActions = {
     const unsubLeaderboard = realtimeEvents.on('LeaderboardUpdated', (leaderboardList: any[]) => {
       if (!Array.isArray(leaderboardList) || leaderboardList.length === 0) return;
       const current = useParticipantStore.getState().participants;
-      const updated = current.map(p => {
-        const found = leaderboardList.find(lb => lb.id === p.id);
-        if (found) {
-          return { ...p, score: found.score, lives: found.lives, rank: found.rank };
+      const currentMap = new Map(current.map(p => [p.id, p]));
+
+      leaderboardList.forEach((lb: any) => {
+        const existing = currentMap.get(lb.id);
+        if (existing) {
+          currentMap.set(lb.id, { ...existing, score: lb.score, lives: lb.lives, rank: lb.rank });
+        } else {
+          currentMap.set(lb.id, {
+            id: lb.id,
+            session_id: lb.session_id,
+            student_id: lb.student_id ?? null,
+            display_name: lb.display_name,
+            score: lb.score,
+            lives: lb.lives,
+            rank: lb.rank,
+            skipped_questions: lb.skipped_questions ?? [],
+            question_status: lb.question_status ?? {},
+            current_progress: lb.current_progress ?? 0,
+            violation_count: lb.violation_count ?? 0,
+            is_completed: lb.is_completed ?? false,
+            joined_at: lb.joined_at,
+          });
         }
-        return p;
       });
+
+      const merged = Array.from(currentMap.values()).sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const timeA = a.joined_at ? new Date(a.joined_at).getTime() : 0;
+        const timeB = b.joined_at ? new Date(b.joined_at).getTime() : 0;
+        return timeA - timeB;
+      });
+
       console.log('STORE_UPDATED', 'leaderboard_scores', leaderboardList.length);
-      useParticipantStore.setState({ participants: updated });
+      useParticipantStore.setState({ participants: merged });
       useLeaderboardStore.setState({ leaderboard: leaderboardList });
     });
 
@@ -641,23 +792,34 @@ export const sessionActions = {
 
   fetchParticipants: async (sessionId: string) => {
     const isMock = checkIsMock();
-    if (isMock) return;
+    if (isMock || !sessionId) return;
 
-    await refreshAuth();
-    try {
-      const res = await ParticipantService.getParticipants(sessionId);
-      const data = res.data;
-      if (res.success && data) {
-        const currentParticipants = useParticipantStore.getState().participants;
-        const currentSig = currentParticipants.map((p: Participant) => `${p.id}:${p.score}:${p.display_name}`).sort().join(',');
-        const newSig = data.map((p: Participant) => `${p.id}:${p.score}:${p.display_name}`).sort().join(',');
-        if (currentSig !== newSig) {
-          useParticipantStore.setState({ participants: data as Participant[] });
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching participants:', err);
+    // ponytail: Deduplicate in-flight requests for same session to prevent concurrent request storm
+    if (participantsFetchPromises[sessionId]) {
+      return participantsFetchPromises[sessionId];
     }
+
+    participantsFetchPromises[sessionId] = (async () => {
+      try {
+        await refreshAuth();
+        const res = await ParticipantService.getParticipants(sessionId);
+        const data = res.data;
+        if (res.success && data) {
+          const currentParticipants = useParticipantStore.getState().participants;
+          const currentSig = currentParticipants.map((p: Participant) => `${p.id}:${p.score}:${p.display_name}`).sort().join(',');
+          const newSig = data.map((p: Participant) => `${p.id}:${p.score}:${p.display_name}`).sort().join(',');
+          if (currentSig !== newSig) {
+            useParticipantStore.setState({ participants: data as Participant[] });
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching participants:', err);
+      } finally {
+        delete participantsFetchPromises[sessionId];
+      }
+    })();
+
+    return participantsFetchPromises[sessionId];
   },
 
   fetchAnswers: async (sessionId: string) => {
@@ -788,20 +950,6 @@ export const sessionActions = {
 
       try {
         await refreshAuth();
-        try {
-          const startFetch = Date.now();
-          const res = await fetch('/api/settings', { method: 'GET' });
-          const serverDateHeader = res.headers.get('date');
-          if (serverDateHeader) {
-            const serverTime = new Date(serverDateHeader).getTime();
-            const roundTrip = Date.now() - startFetch;
-            const adjustedServerTime = serverTime + roundTrip / 2;
-            useSessionStore.setState({ serverTimeOffset: Date.now() - adjustedServerTime });
-            console.log('play-store clock drift measured:', Date.now() - adjustedServerTime, 'ms');
-          }
-        } catch (e) {
-          console.warn('Failed to calculate server clock offset:', e);
-        }
 
         let quizRes = await QuizService.getQuizByPin(pinCode);
         let quizData = quizRes.data;
@@ -833,69 +981,59 @@ export const sessionActions = {
           return false;
         }
 
-        const existingPartRes = await ParticipantService.getParticipantBySessionAndName(sessionData.id, displayName);
-        let partData = existingPartRes.success ? existingPartRes.data : null;
+        // ponytail: Directly join session via POST /api/participants (which handles duplicate checks and reconnects natively)
+        const insertPayload = {
+          session_id: sessionData.id,
+          student_id: studentId || null,
+          display_name: displayName,
+          score: 0,
+          lives: quizData.lives_count !== undefined ? quizData.lives_count : 3,
+          skipped_questions: [],
+          question_status: {},
+          current_progress: 0,
+          violation_count: 0,
+          is_completed: false,
+        };
 
-        if (!partData) {
-          const insertPayload = {
-            session_id: sessionData.id,
-            student_id: studentId || null,
-            display_name: displayName,
-            score: 0,
-            lives: quizData.lives_count !== undefined ? quizData.lives_count : 3,
-            skipped_questions: [],
-            question_status: {},
-            current_progress: 0,
-            violation_count: 0,
-            is_completed: false,
-          };
+        let joinRes = await ParticipantService.joinParticipant(insertPayload);
+        let partData = joinRes.data;
+        let partErr = joinRes.error;
 
-          let joinRes = await ParticipantService.joinParticipant(insertPayload);
-          let newPart = joinRes.data;
-          let partErr = joinRes.error;
+        if (partErr && studentId) {
+          console.warn('Failed to insert participant with student_id, retrying without student_id:', partErr);
+          const retryJoinRes = await ParticipantService.joinParticipant({
+            ...insertPayload,
+            student_id: null,
+          });
+          partData = retryJoinRes.data;
+          partErr = retryJoinRes.error;
+        }
 
-          if (partErr && studentId) {
-            console.warn('Failed to insert participant with student_id, retrying without student_id:', partErr);
-            const retryJoinRes = await ParticipantService.joinParticipant({
-              ...insertPayload,
-              student_id: null,
-            });
-            newPart = retryJoinRes.data;
-            partErr = retryJoinRes.error;
-          }
-
-          if (partErr || !newPart) {
-            const errMsg = typeof partErr === 'string' ? partErr : (partErr?.message || '');
-            const isUniqueViolation = (partErr && partErr.code === '23505') || errMsg.includes('sudah digunakan');
-            useUiStore.setState({
-              error: isUniqueViolation
-                ? 'Nama tampilan sudah digunakan di lobby ini.'
-                : `Gagal bergabung: ${errMsg || 'Unknown error'}`,
-              loading: false
-            });
-            return false;
-          }
-          partData = newPart;
-        } else {
-          if (partData.student_id !== studentId && studentId) {
-            const updateRes = await ParticipantService.updateParticipant(partData.id, { student_id: studentId });
-            if (updateRes.success && updateRes.data) {
-              partData = updateRes.data;
-            }
-          }
+        if (partErr || !partData) {
+          const errMsg = typeof partErr === 'string' ? partErr : (partErr?.message || '');
+          const isUniqueViolation = (partErr && partErr.code === '23505') || errMsg.includes('sudah digunakan');
+          useUiStore.setState({
+            error: isUniqueViolation
+              ? 'Nama tampilan sudah digunakan di lobby ini.'
+              : `Gagal bergabung: ${errMsg || 'Unknown error'}`,
+            loading: false
+          });
+          return false;
         }
 
         const questionsRes = await QuestionService.getQuestions(sessionData.quiz_id);
         const loadedQs = questionsRes.success && questionsRes.data ? questionsRes.data : [];
 
-        const answersRes = await AnswerService.getParticipantAnswers(partData.id);
-        const answersData = answersRes.success ? answersRes.data : [];
-
-        const map: Record<string, Answer> = {};
-        if (answersData) {
-          answersData.forEach((a: any) => {
-            map[a.question_id] = a as Answer;
-          });
+        // Only fetch previous answers if this is a reconnecting participant with existing progress or completed
+        let map: Record<string, Answer> = {};
+        if (partData.is_completed || partData.current_progress > 0 || partData.score > 0) {
+          const answersRes = await AnswerService.getParticipantAnswers(partData.id);
+          const answersData = answersRes.success ? answersRes.data : [];
+          if (answersData) {
+            answersData.forEach((a: any) => {
+              map[a.question_id] = a as Answer;
+            });
+          }
         }
 
         useSessionStore.setState({ session: sessionData as QuizSession, quiz: quizData as Quiz });
@@ -915,12 +1053,13 @@ export const sessionActions = {
           const activeQ = loadedQs[activeIdx];
           if (activeQ) {
             const options = await fetchOptionsById(activeQ.id);
-            const hasAns = !!map[activeQ.id];
+            const isSkipped = (partData.skipped_questions || []).includes(activeQ.id) || (partData.question_status || {})[activeQ.id] === 'skipped';
+            const hasAns = !!map[activeQ.id] || isSkipped;
             useQuestionStore.setState({ currentQuestion: activeQ, currentOptions: options });
             useAnswerStore.setState({
               hasAnswered: hasAns,
-              isAnswerCorrect: hasAns ? map[activeQ.id].is_correct : null,
-              scoreAwarded: hasAns ? map[activeQ.id].score_awarded : 0,
+              isAnswerCorrect: isSkipped ? null : (hasAns ? map[activeQ.id].is_correct : null),
+              scoreAwarded: hasAns && !isSkipped ? map[activeQ.id].score_awarded : 0,
             });
           }
         }
@@ -953,6 +1092,9 @@ export const sessionActions = {
     console.log('SUBSCRIPTION_STATUS', { role: 'student', sessionId, participantId: participant?.id || null, status: 'CONNECTING' });
 
     RealtimeManager.connectAsStudent(sessionId, participant?.id || '');
+
+    // Fetch initial participants in this room immediately
+    sessionActions.fetchParticipants(sessionId);
 
     const unsubStatus = RealtimeManager.onStatusChange((status) => {
       console.log('SUBSCRIPTION_STATUS', { role: 'student', sessionId, status });
@@ -993,7 +1135,37 @@ export const sessionActions = {
     const unsubPart = realtimeEvents.on('ParticipantUpdated', handlePartUpdate);
     const unsubMyPart = realtimeEvents.on('MyParticipantUpdated', handlePartUpdate);
 
-    studentRealtimeUnsubs.push(unsubStatus, unsubSess, unsubPart, unsubMyPart);
+    // ponytail: Realtime lobby participants synchronization for student side
+    const unsubJoined = realtimeEvents.on('ParticipantJoined', (newPart: Participant) => {
+      if (newPart.session_id && newPart.session_id !== sessionId) return;
+      const current = useParticipantStore.getState().participants;
+      if (current.some(p => p.id === newPart.id)) return;
+      console.log('STORE_UPDATED', 'student_participant_joined', newPart.display_name);
+      useParticipantStore.setState({ participants: [...current, newPart] });
+    });
+
+    const unsubLeft = realtimeEvents.on('ParticipantLeft', (leftData: any) => {
+      if (leftData.session_id && leftData.session_id !== sessionId) return;
+      if (leftData.id) {
+        const current = useParticipantStore.getState().participants;
+        console.log('STORE_UPDATED', 'student_participant_left', leftData.id);
+        useParticipantStore.setState({
+          participants: current.filter(p => p.id !== leftData.id)
+        });
+      } else {
+        sessionActions.fetchParticipants(sessionId);
+      }
+    });
+
+    const unsubSynced = realtimeEvents.on('ParticipantsSynced', (syncData: any) => {
+      if (syncData.session_id && syncData.session_id !== sessionId) return;
+      if (Array.isArray(syncData.participants)) {
+        console.log('STORE_UPDATED', 'student_participants_synced', syncData.participants.length);
+        useParticipantStore.setState({ participants: syncData.participants });
+      }
+    });
+
+    studentRealtimeUnsubs.push(unsubStatus, unsubSess, unsubPart, unsubMyPart, unsubJoined, unsubLeft, unsubSynced);
   },
 
   stopListening: () => {
@@ -1053,7 +1225,10 @@ export const sessionActions = {
         console.log('ASYNC_FETCH_COMPLETED', { type: 'options', questionId: nextQ.id, optionsCount: opts.length });
       }
 
-      const hasAns = !!answersMap[nextQ.id];
+      const qStatus = useAnswerStore.getState().questionStatus || {};
+      const skippedList = useAnswerStore.getState().skippedQuestions || [];
+      const isSkipped = skippedList.includes(nextQ.id) || qStatus[nextQ.id] === 'skipped';
+      const hasAns = !!answersMap[nextQ.id] || isSkipped;
 
       useQuestionStore.setState({
         currentQuestionIndex: activeIdx,
@@ -1067,8 +1242,8 @@ export const sessionActions = {
 
       useAnswerStore.setState({
         hasAnswered: hasAns,
-        isAnswerCorrect: hasAns ? answersMap[nextQ.id].is_correct : null,
-        scoreAwarded: hasAns ? answersMap[nextQ.id].score_awarded : 0,
+        isAnswerCorrect: isSkipped ? null : (hasAns ? answersMap[nextQ.id].is_correct : null),
+        scoreAwarded: (hasAns && !isSkipped) ? answersMap[nextQ.id].score_awarded : 0,
         questionStartedAt: startedAt,
       });
 

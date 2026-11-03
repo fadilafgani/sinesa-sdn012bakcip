@@ -13,6 +13,7 @@ export interface PlayState {
   session: QuizSession | null;
   quiz: Quiz | null;
   participant: Participant | null;
+  participants: Participant[];
   currentQuestion: Question | null;
   currentOptions: Option[];
   hasAnswered: boolean;
@@ -46,6 +47,7 @@ export interface PlayState {
   submitFinalQuiz: () => Promise<void>;
   saveAnswerState: (questionId: string, answerData: any) => void;
   fetchLeaderboard: () => Promise<Participant[]>;
+  fetchParticipants: (sessionId: string) => Promise<void>;
   fetchQuestionStats: (questionId: string) => Promise<{ correctCount: number; incorrectCount: number; totalCount: number } | null>;
   incrementViolation: () => Promise<void>;
 }
@@ -65,6 +67,7 @@ const actions = {
   submitFinalQuiz: answerActions.submitFinalQuiz,
   saveAnswerState: answerActions.saveAnswerState,
   fetchLeaderboard: answerActions.fetchLeaderboard,
+  fetchParticipants: sessionActions.fetchParticipants,
   fetchQuestionStats: answerActions.fetchQuestionStats,
   incrementViolation: answerActions.incrementViolation,
 };
@@ -74,6 +77,7 @@ export function usePlayStore<T = PlayState>(selector?: (state: PlayState) => T):
   const session = useSessionStore(state => state.session);
   const quiz = useSessionStore(state => state.quiz);
   const participant = useParticipantStore(state => state.participant);
+  const participants = useParticipantStore(state => state.participants);
   const currentQuestion = useQuestionStore(state => state.currentQuestion);
   const currentOptions = useQuestionStore(state => state.currentOptions);
   const hasAnswered = useAnswerStore(state => state.hasAnswered);
@@ -97,6 +101,7 @@ export function usePlayStore<T = PlayState>(selector?: (state: PlayState) => T):
     session,
     quiz,
     participant,
+    participants,
     currentQuestion,
     currentOptions,
     hasAnswered,
@@ -127,6 +132,7 @@ usePlayStore.getState = (): PlayState => {
     session: useSessionStore.getState().session,
     quiz: useSessionStore.getState().quiz,
     participant: useParticipantStore.getState().participant,
+    participants: useParticipantStore.getState().participants,
     currentQuestion: useQuestionStore.getState().currentQuestion,
     currentOptions: useQuestionStore.getState().currentOptions,
     hasAnswered: useAnswerStore.getState().hasAnswered,

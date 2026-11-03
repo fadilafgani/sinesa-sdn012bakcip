@@ -23,9 +23,68 @@ $pdo = get_db();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 /**
+ * Compute participant statistics (correct, incorrect, unanswered, accuracy)
+ */
+function compute_participant_statistics(PDO $pdo, string $participantId, string $sessionId): array {
+    static $sessionTotalQuestionsCache = [];
+
+    if (!isset($sessionTotalQuestionsCache[$sessionId])) {
+        $qStmt = $pdo->prepare("
+            SELECT COUNT(q.id) 
+            FROM questions q 
+            JOIN quiz_sessions s ON s.quiz_id = q.quiz_id 
+            WHERE s.id = :session_id
+        ");
+        $qStmt->execute([':session_id' => $sessionId]);
+        $sessionTotalQuestionsCache[$sessionId] = (int)$qStmt->fetchColumn();
+    }
+    $totalQuestions = $sessionTotalQuestionsCache[$sessionId];
+
+    // Count answers: correct vs incorrect
+    $ansStmt = $pdo->prepare("
+        SELECT 
+            COALESCE(SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_count,
+            COALESCE(SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END), 0) AS incorrect_count
+        FROM answers
+        WHERE participant_id = :pid
+    ");
+    $ansStmt->execute([':pid' => $participantId]);
+    $counts = $ansStmt->fetch(PDO::FETCH_ASSOC);
+
+    $correctCount = (int)($counts['correct_count'] ?? 0);
+    $incorrectCount = (int)($counts['incorrect_count'] ?? 0);
+    $unansweredCount = max(0, $totalQuestions - ($correctCount + $incorrectCount));
+
+    $accuracy = $totalQuestions > 0 
+        ? round(($correctCount / $totalQuestions) * 100, 1) 
+        : 0.0;
+
+    return [
+        'total_questions'  => $totalQuestions,
+        'correct_count'    => $correctCount,
+        'incorrect_count'  => $incorrectCount,
+        'unanswered_count' => $unansweredCount,
+        'accuracy'         => $accuracy,
+    ];
+}
+
+/**
  * Format a participant database row into typed JSON contract
  */
-function format_participant_row(array $row): array {
+function format_participant_row(array $row, ?array $stats = null): array {
+    global $pdo;
+    if ($stats === null && $pdo instanceof PDO && !empty($row['id']) && !empty($row['session_id'])) {
+        $stats = compute_participant_statistics($pdo, (string)$row['id'], (string)$row['session_id']);
+    }
+
+    $statsData = $stats ?? [
+        'total_questions'  => 0,
+        'correct_count'    => 0,
+        'incorrect_count'  => 0,
+        'unanswered_count' => 0,
+        'accuracy'         => 0.0,
+    ];
+
     $skipped = [];
     if (!empty($row['skipped_questions'])) {
         $decoded = is_string($row['skipped_questions'])
@@ -59,6 +118,11 @@ function format_participant_row(array $row): array {
         'violation_count'   => (int)($row['violation_count'] ?? 0),
         'is_completed'      => (bool)($row['is_completed'] ?? 0),
         'joined_at'         => (string)$row['joined_at'],
+        'stats'             => $statsData,
+        'total_correct'     => (int)$statsData['correct_count'],
+        'total_incorrect'   => (int)$statsData['incorrect_count'],
+        'total_unanswered'  => (int)$statsData['unanswered_count'],
+        'accuracy'          => (float)$statsData['accuracy'],
     ];
 }
 
@@ -82,6 +146,9 @@ try {
                        s.id AS s_id, s.quiz_id AS s_quiz_id, s.host_id AS s_host_id,
                        s.status AS s_status, s.current_stage AS s_current_stage,
                        s.current_question_index AS s_current_question_index,
+                       s.countdown_started_at AS s_countdown_started_at,
+                       s.countdown_expires_at AS s_countdown_expires_at,
+                       s.countdown_duration AS s_countdown_duration,
                        s.question_started_at AS s_question_started_at,
                        s.question_expires_at AS s_question_expires_at,
                        s.quiz_mode AS s_quiz_mode, s.lives_count AS s_lives_count,
@@ -122,8 +189,12 @@ try {
                 'status'                   => (string)($row['s_status'] ?? 'lobby'),
                 'current_stage'            => (string)($row['s_current_stage'] ?? 'waiting'),
                 'current_question_index'   => (int)($row['s_current_question_index'] ?? -1),
-                'question_started_at'      => $row['s_question_started_at'] !== null ? (string)$row['s_question_started_at'] : null,
-                'question_expires_at'      => $row['s_question_expires_at'] !== null ? (string)$row['s_question_expires_at'] : null,
+                'countdown_started_at'     => !empty($row['s_countdown_started_at']) ? gmdate('Y-m-d\TH:i:s\Z', strtotime((string)$row['s_countdown_started_at'])) : null,
+                'countdown_expires_at'     => !empty($row['s_countdown_expires_at']) ? gmdate('Y-m-d\TH:i:s\Z', strtotime((string)$row['s_countdown_expires_at'])) : null,
+                'countdown_duration'       => (int)($row['s_countdown_duration'] ?? 3),
+                'server_time'              => round(microtime(true) * 1000),
+                'question_started_at'      => !empty($row['s_question_started_at']) ? gmdate('Y-m-d\TH:i:s\Z', strtotime((string)$row['s_question_started_at'])) : null,
+                'question_expires_at'      => !empty($row['s_question_expires_at']) ? gmdate('Y-m-d\TH:i:s\Z', strtotime((string)$row['s_question_expires_at'])) : null,
                 'quiz_mode'                => (string)($row['s_quiz_mode'] ?? 'serius'),
                 'lives_count'              => (int)($row['s_lives_count'] ?? 3),
                 'show_final_result'        => (bool)($row['s_show_final_result'] ?? 1),
@@ -168,6 +239,13 @@ try {
 
         // 3. Student Evaluation History (dashboard.tsx)
         if ($studentId !== '' && $action === 'history') {
+            $auth = get_optional_auth();
+            $authUserId = (string)($auth['sub'] ?? '');
+            $authUserRole = (string)($auth['role'] ?? '');
+            if ($authUserId === '' || ($authUserRole !== 'admin' && $authUserId !== $studentId)) {
+                send_error_response('Otorisasi gagal: Anda tidak memiliki akses ke riwayat murid ini.', 403);
+            }
+
             $stmt = $pdo->prepare("
                 SELECT p.id, p.score, p.joined_at,
                        s.id AS session_id, s.completed_at,
@@ -295,6 +373,30 @@ try {
             send_error_response('ID Sesi (session_id) dan nama tampilan (display_name) wajib diisi.', 400);
         }
 
+        // ponytail: Security check & Guest participation policy enforcement (UAT-033)
+        $auth = get_optional_auth();
+        $authUserId = (string)($auth['sub'] ?? '');
+        $authUserRole = (string)($auth['role'] ?? '');
+
+        // If client claims a student_id, verify auth token matches
+        if ($studentId !== null) {
+            if ($authUserId === '') {
+                // Unauthenticated request claiming to be a student: demote to guest
+                $studentId = null;
+            } elseif ($authUserId !== $studentId && $authUserRole !== 'admin') {
+                send_error_response('ID murid tidak valid atau tidak sesuai dengan token sesi.', 403);
+            }
+        }
+
+        // If guest (student_id is null): strictly verify allow_guest_participants setting on server
+        if ($studentId === null) {
+            $guestStmt = $pdo->query("SELECT `value` FROM settings WHERE `key` = 'allow_guest_participants' LIMIT 1");
+            $allowGuestVal = $guestStmt ? (string)$guestStmt->fetchColumn() : 'false';
+            if ($allowGuestVal !== 'true') {
+                send_error_response('Partisipan tamu dinonaktifkan oleh Administrator. Silakan masuk menggunakan akun murid.', 403);
+            }
+        }
+
         // 1. Verify session exists
         $sessStmt = $pdo->prepare("SELECT id, status FROM quiz_sessions WHERE id = :sid LIMIT 1");
         $sessStmt->execute([':sid' => $sessionId]);
@@ -318,8 +420,11 @@ try {
         $existingPart = $dupStmt->fetch();
 
         if ($existingPart) {
-            // If the existing participant matches the student_id or user is reconnecting
-            if ($studentId && $existingPart['student_id'] === $studentId) {
+            // If the existing participant matches the student_id or guest is reconnecting
+            if ($studentId !== null && $existingPart['student_id'] === $studentId) {
+                send_success_response(format_participant_row($existingPart));
+            }
+            if ($studentId === null && $existingPart['student_id'] === null) {
                 send_success_response(format_participant_row($existingPart));
             }
 

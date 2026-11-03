@@ -16,7 +16,7 @@ const refreshAuth = async () => {
 };
 
 export const answerActions = {
-  submitAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
+  submitAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string>; is_timeout?: boolean }) => {
     await refreshAuth();
 
     const session = useSessionStore.getState().session;
@@ -36,30 +36,39 @@ export const answerActions = {
     let optionIdsToSave: string[] | null = null;
     let matchingAnswersToSave: Record<string, string> | null = null;
 
+    const isExplicitTimeout = (typeof arg === 'object' && arg !== null && (arg as any).is_timeout === true);
+    const isEmptyString = typeof arg === 'string' && arg.trim() === '';
+    const isEmptyMulti = typeof arg === 'object' && arg !== null && Array.isArray(arg.optionIds) && arg.optionIds.length === 0;
+    const isEmptyMatching = typeof arg === 'object' && arg !== null && arg.matchingAnswers && Object.keys(arg.matchingAnswers).length === 0;
+    const isEmptyOptId = typeof arg === 'object' && arg !== null && 'optionId' in arg && !arg.optionId;
+    const isTimeout = isExplicitTimeout || isEmptyString || isEmptyMulti || isEmptyMatching || isEmptyOptId;
+
     const qType = currentQuestion.question_type || 'multiple_choice';
 
-    if (typeof arg === 'string') {
-      const option = currentOptions.find(o => o.id === arg);
-      if (option) {
-        isCorrect = option.is_correct;
-        optionIdToSave = arg;
-      }
-    } else {
-      if (qType === 'multiple_answer') {
-        const selectedIds = arg.optionIds || [];
-        const correctIds = currentOptions.filter(o => o.is_correct).map(o => o.id);
-        isCorrect = correctIds.length === selectedIds.length && correctIds.every(id => selectedIds.includes(id));
-        optionIdsToSave = selectedIds;
-      } else if (qType === 'matching') {
-        const matchingPairs = arg.matchingAnswers || {};
-        isCorrect = currentOptions.every(o => matchingPairs[o.id] === o.match_text);
-        matchingAnswersToSave = matchingPairs;
-      } else {
-        const optId = arg.optionId || '';
-        const option = currentOptions.find(o => o.id === optId);
+    if (!isTimeout) {
+      if (typeof arg === 'string') {
+        const option = currentOptions.find(o => o.id === arg);
         if (option) {
           isCorrect = option.is_correct;
-          optionIdToSave = optId;
+          optionIdToSave = arg;
+        }
+      } else {
+        if (qType === 'multiple_answer') {
+          const selectedIds = arg.optionIds || [];
+          const correctIds = currentOptions.filter(o => o.is_correct).map(o => o.id);
+          isCorrect = correctIds.length === selectedIds.length && correctIds.every(id => selectedIds.includes(id));
+          optionIdsToSave = selectedIds;
+        } else if (qType === 'matching') {
+          const matchingPairs = arg.matchingAnswers || {};
+          isCorrect = currentOptions.every(o => matchingPairs[o.id] === o.match_text);
+          matchingAnswersToSave = matchingPairs;
+        } else {
+          const optId = arg.optionId || '';
+          const option = currentOptions.find(o => o.id === optId);
+          if (option) {
+            isCorrect = option.is_correct;
+            optionIdToSave = optId;
+          }
         }
       }
     }
@@ -67,17 +76,21 @@ export const answerActions = {
     const now = new Date();
     const startedAt = session.question_started_at ? new Date(session.question_started_at) : now;
     const responseTime = Math.max(0, now.getTime() - startedAt.getTime());
-    const scoreAwarded = isCorrect ? currentQuestion.points : 0;
+    const scoreAwarded = (isCorrect && !isTimeout) ? currentQuestion.points : 0;
 
     let newLives = useParticipantStore.getState().lives;
     const quiz = useSessionStore.getState().quiz;
     const initialLives = quiz?.lives_count ?? 3;
-    if (!isCorrect && session.quiz_mode === 'santai' && initialLives > 0) {
+    if (!isCorrect && !isTimeout && session.quiz_mode === 'santai' && initialLives > 0) {
       newLives = Math.max(0, newLives - 1);
     }
 
     const questionStatus = useAnswerStore.getState().questionStatus;
-    const updatedStatuses = { ...questionStatus, [currentQuestion.id]: 'answered' as const };
+    const updatedStatuses = { ...questionStatus, [currentQuestion.id]: isTimeout ? ('skipped' as const) : ('answered' as const) };
+    const currentSkipped = useAnswerStore.getState().skippedQuestions || [];
+    const updatedSkipped = (isTimeout && !currentSkipped.includes(currentQuestion.id))
+      ? [...currentSkipped, currentQuestion.id]
+      : currentSkipped;
 
     if (isMock) {
       const answersKey = `answers_${session.id}`;
@@ -93,15 +106,19 @@ export const answerActions = {
         response_time_ms: responseTime,
         score_awarded: scoreAwarded,
         answered_at: now.toISOString(),
-      };
-      localStorage.setItem(answersKey, JSON.stringify([...answers, newAnswer]));
+        ...(isTimeout ? { is_timeout: true, status: 'skipped' } : {})
+      } as any;
+      if (!isTimeout) {
+        localStorage.setItem(answersKey, JSON.stringify([...answers, newAnswer]));
+      }
 
       const newScore = participant.score + scoreAwarded;
       const updatedPart = {
         ...participant,
         score: newScore,
         lives: newLives,
-        question_status: updatedStatuses
+        question_status: updatedStatuses,
+        skipped_questions: updatedSkipped
       };
 
       const partsKey = `participants_${session.id}`;
@@ -113,8 +130,9 @@ export const answerActions = {
       const currentAnswersMap = useAnswerStore.getState().answersMap;
       useAnswerStore.setState({
         questionStatus: updatedStatuses,
+        skippedQuestions: updatedSkipped,
         hasAnswered: true,
-        isAnswerCorrect: isCorrect,
+        isAnswerCorrect: isTimeout ? null : isCorrect,
         scoreAwarded,
         answersMap: { ...currentAnswersMap, [currentQuestion.id]: newAnswer }
       });
@@ -131,14 +149,15 @@ export const answerActions = {
         is_correct: isCorrect,
         response_time_ms: responseTime,
         score_awarded: scoreAwarded,
-      });
+        is_timeout: isTimeout,
+      } as any);
 
       if (!insertRes.success) throw insertRes.error;
 
       console.log('DATABASE_UPDATED', 'answer_submitted', insertRes.data);
 
-      const actualScore = insertRes.data?.score_awarded ?? scoreAwarded;
-      const actualIsCorrect = insertRes.data?.is_correct ?? isCorrect;
+      const actualScore = isTimeout ? 0 : (insertRes.data?.score_awarded ?? scoreAwarded);
+      const actualIsCorrect = isTimeout ? false : (insertRes.data?.is_correct ?? isCorrect);
 
       const returnedPart = (insertRes.data as any)?.participant;
       let updatedPart = returnedPart;
@@ -149,6 +168,7 @@ export const answerActions = {
           score: newScore,
           lives: newLives,
           question_status: updatedStatuses,
+          skipped_questions: updatedSkipped,
         });
         if (!updateRes.success) throw updateRes.error;
         updatedPart = updateRes.data;
@@ -166,16 +186,19 @@ export const answerActions = {
           response_time_ms: responseTime,
           score_awarded: actualScore,
           answered_at: now.toISOString(),
-        };
+          ...(isTimeout ? { is_timeout: true, status: 'skipped' } : {})
+        } as any;
         const currentAnswersMap = useAnswerStore.getState().answersMap;
 
         useParticipantStore.setState({ participant: updatedPart as Participant, lives: newLives });
         useAnswerStore.setState({
           questionStatus: updatedStatuses,
+          skippedQuestions: updatedSkipped,
           hasAnswered: true,
-          isAnswerCorrect: actualIsCorrect,
+          isAnswerCorrect: isTimeout ? null : actualIsCorrect,
           scoreAwarded: actualScore,
-          answersMap: { ...currentAnswersMap, [currentQuestion.id]: submittedAnswer }
+          answersMap: { ...currentAnswersMap, [currentQuestion.id]: submittedAnswer },
+          ...(updatedPart?.is_completed ? { isCompleted: true } : {})
         });
       }
     } catch (err: any) {
@@ -188,7 +211,7 @@ export const answerActions = {
     }
   },
 
-  submitSelfPacedAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string> }) => {
+  submitSelfPacedAnswer: async (arg: string | { optionId?: string; optionIds?: string[]; matchingAnswers?: Record<string, string>; is_timeout?: boolean }) => {
     await refreshAuth();
 
     const session = useSessionStore.getState().session;
@@ -209,45 +232,58 @@ export const answerActions = {
     let optionIdsToSave: string[] | null = null;
     let matchingAnswersToSave: Record<string, string> | null = null;
 
+    const isExplicitTimeout = (typeof arg === 'object' && arg !== null && (arg as any).is_timeout === true);
+    const isEmptyString = typeof arg === 'string' && arg.trim() === '';
+    const isEmptyMulti = typeof arg === 'object' && arg !== null && Array.isArray(arg.optionIds) && arg.optionIds.length === 0;
+    const isEmptyMatching = typeof arg === 'object' && arg !== null && arg.matchingAnswers && Object.keys(arg.matchingAnswers).length === 0;
+    const isEmptyOptId = typeof arg === 'object' && arg !== null && 'optionId' in arg && !arg.optionId;
+    const isTimeout = isExplicitTimeout || isEmptyString || isEmptyMulti || isEmptyMatching || isEmptyOptId;
+
     const qType = currentQuestion.question_type || 'multiple_choice';
 
-    if (typeof arg === 'string') {
-      const option = currentOptions.find(o => o.id === arg);
-      if (option) {
-        isCorrect = option.is_correct;
-        optionIdToSave = arg;
-      }
-    } else {
-      if (qType === 'multiple_answer') {
-        const selectedIds = arg.optionIds || [];
-        const correctIds = currentOptions.filter(o => o.is_correct).map(o => o.id);
-        isCorrect = correctIds.length === selectedIds.length && correctIds.every(id => selectedIds.includes(id));
-        optionIdsToSave = selectedIds;
-      } else if (qType === 'matching') {
-        const matchingPairs = arg.matchingAnswers || {};
-        isCorrect = currentOptions.every(o => matchingPairs[o.id] === o.match_text);
-        matchingAnswersToSave = matchingPairs;
-      } else {
-        const optId = arg.optionId || '';
-        const option = currentOptions.find(o => o.id === optId);
+    if (!isTimeout) {
+      if (typeof arg === 'string') {
+        const option = currentOptions.find(o => o.id === arg);
         if (option) {
           isCorrect = option.is_correct;
-          optionIdToSave = optId;
+          optionIdToSave = arg;
+        }
+      } else {
+        if (qType === 'multiple_answer') {
+          const selectedIds = arg.optionIds || [];
+          const correctIds = currentOptions.filter(o => o.is_correct).map(o => o.id);
+          isCorrect = correctIds.length === selectedIds.length && correctIds.every(id => selectedIds.includes(id));
+          optionIdsToSave = selectedIds;
+        } else if (qType === 'matching') {
+          const matchingPairs = arg.matchingAnswers || {};
+          isCorrect = currentOptions.every(o => matchingPairs[o.id] === o.match_text);
+          matchingAnswersToSave = matchingPairs;
+        } else {
+          const optId = arg.optionId || '';
+          const option = currentOptions.find(o => o.id === optId);
+          if (option) {
+            isCorrect = option.is_correct;
+            optionIdToSave = optId;
+          }
         }
       }
     }
 
     const responseTime = questionStartedAt > 0 ? Date.now() - questionStartedAt : 0;
-    const scoreAwarded = isCorrect ? currentQuestion.points : 0;
+    const scoreAwarded = (isCorrect && !isTimeout) ? currentQuestion.points : 0;
 
     let newLives = useParticipantStore.getState().lives;
     const quiz = useSessionStore.getState().quiz;
     const initialLives = quiz?.lives_count ?? 3;
-    if (!isCorrect && session.quiz_mode === 'santai' && initialLives > 0) {
+    if (!isCorrect && !isTimeout && session.quiz_mode === 'santai' && initialLives > 0) {
       newLives = Math.max(0, newLives - 1);
     }
 
-    const updatedStatuses = { ...questionStatus, [currentQuestion.id]: 'answered' as const };
+    const updatedStatuses = { ...questionStatus, [currentQuestion.id]: isTimeout ? ('skipped' as const) : ('answered' as const) };
+    const currentSkipped = useAnswerStore.getState().skippedQuestions || [];
+    const updatedSkipped = (isTimeout && !currentSkipped.includes(currentQuestion.id))
+      ? [...currentSkipped, currentQuestion.id]
+      : currentSkipped;
 
     const newAnswer: Answer = {
       id: `ans-${isMock ? 'mock' : 'real'}-${Date.now()}`,
@@ -260,14 +296,16 @@ export const answerActions = {
       response_time_ms: responseTime,
       score_awarded: scoreAwarded,
       answered_at: new Date().toISOString(),
-    };
+      ...(isTimeout ? { is_timeout: true, status: 'skipped' } : {})
+    } as any;
 
     const newScore = participant.score + scoreAwarded;
     const updatedPart = {
       ...participant,
       score: newScore,
       lives: newLives,
-      question_status: updatedStatuses
+      question_status: updatedStatuses,
+      skipped_questions: updatedSkipped,
     };
 
     const updatedAnswersMap = { ...answersMap, [currentQuestion.id]: newAnswer };
@@ -275,16 +313,19 @@ export const answerActions = {
     useParticipantStore.setState({ participant: updatedPart, lives: newLives });
     useAnswerStore.setState({
       questionStatus: updatedStatuses,
+      skippedQuestions: updatedSkipped,
       answersMap: updatedAnswersMap,
       hasAnswered: true,
-      isAnswerCorrect: isCorrect,
+      isAnswerCorrect: isTimeout ? null : isCorrect,
       scoreAwarded
     });
 
     const answersKey = `answers_${session.id}`;
     if (isMock) {
-      const answers = JSON.parse(localStorage.getItem(answersKey) || '[]');
-      localStorage.setItem(answersKey, JSON.stringify([...answers, newAnswer]));
+      if (!isTimeout) {
+        const answers = JSON.parse(localStorage.getItem(answersKey) || '[]');
+        localStorage.setItem(answersKey, JSON.stringify([...answers, newAnswer]));
+      }
 
       const partsKey = `participants_${session.id}`;
       const parts = JSON.parse(localStorage.getItem(partsKey) || '[]');
@@ -299,16 +340,21 @@ export const answerActions = {
           selected_option_ids: optionIdsToSave,
           matching_answers: matchingAnswersToSave,
           response_time_ms: responseTime,
+          is_timeout: isTimeout,
         } as any);
 
         if (subRes.success && (subRes.data as any)?.participant) {
           const retPart = (subRes.data as any).participant;
           useParticipantStore.setState({ participant: retPart, lives: retPart.lives });
+          if (retPart.is_completed) {
+            useAnswerStore.setState({ isCompleted: true });
+          }
         } else {
           await ParticipantService.updateParticipant(participant.id, {
             score: newScore,
             lives: newLives,
-            question_status: updatedStatuses
+            question_status: updatedStatuses,
+            skipped_questions: updatedSkipped,
           });
         }
       } catch (e) {

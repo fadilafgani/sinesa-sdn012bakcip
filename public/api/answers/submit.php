@@ -206,13 +206,38 @@ try {
         FOR UPDATE
     ");
     $dupCheck->execute([':pid' => $participantId, ':qid' => $questionId]);
-    if ($dupCheck->fetch()) {
+
+    // Check if question already processed in participant's question_status
+    $currentQStatus = [];
+    if (!empty($participant['question_status'])) {
+        $decoded = is_string($participant['question_status'])
+            ? json_decode($participant['question_status'], true)
+            : $participant['question_status'];
+        if (is_array($decoded)) {
+            $currentQStatus = $decoded;
+        }
+    }
+
+    if ($dupCheck->fetch() || (isset($currentQStatus[$questionId]) && in_array($currentQStatus[$questionId], ['answered', 'skipped'], true))) {
         $pdo->rollBack();
         send_error_response([
-            'message' => 'Pertanyaan ini sudah dijawab sebelumnya oleh peserta.',
+            'message' => 'Pertanyaan ini sudah dijawab atau diproses sebelumnya oleh peserta.',
             'code'    => 'ALREADY_ANSWERED',
         ], 409);
     }
+
+    // Step 5b: DETECT TIMEOUT / UNANSWERED SUBMISSION
+    $isTimeout = !empty($input['is_timeout'])
+        || !empty($input['timeout'])
+        || ($input['action'] ?? '') === 'timeout'
+        || (
+            empty($input['selected_option_id'])
+            && empty($input['optionId'])
+            && empty($input['selected_option_ids'])
+            && empty($input['optionIds'])
+            && empty($input['matching_answers'])
+            && empty($input['matchingAnswers'])
+        );
 
     // Fetch official options directly from database (Source of Truth)
     $optStmt = $pdo->prepare("
@@ -231,57 +256,59 @@ try {
     $selectedOptionIdsToSave = null;
     $matchingAnswersToSave = null;
 
-    if ($questionType === 'multiple_choice' || $questionType === 'true_false') {
-        $chosenOptId = sanitize_string($input['selected_option_id'] ?? $input['optionId'] ?? '');
-        if ($chosenOptId !== '') {
-            $selectedOptionIdToSave = $chosenOptId;
+    if (!$isTimeout) {
+        if ($questionType === 'multiple_choice' || $questionType === 'true_false') {
+            $chosenOptId = sanitize_string($input['selected_option_id'] ?? $input['optionId'] ?? '');
+            if ($chosenOptId !== '') {
+                $selectedOptionIdToSave = $chosenOptId;
+                foreach ($officialOptions as $opt) {
+                    if ($opt['id'] === $chosenOptId && !empty($opt['is_correct'])) {
+                        $isCorrect = true;
+                        break;
+                    }
+                }
+            }
+        } elseif ($questionType === 'multiple_answer') {
+            $chosenOptIds = $input['selected_option_ids'] ?? $input['optionIds'] ?? [];
+            if (!is_array($chosenOptIds)) {
+                $chosenOptIds = [];
+            }
+            $chosenOptIds = array_values(array_unique(array_map('sanitize_string', $chosenOptIds)));
+            $selectedOptionIdsToSave = $chosenOptIds;
+
+            $correctOptionIds = [];
             foreach ($officialOptions as $opt) {
-                if ($opt['id'] === $chosenOptId && !empty($opt['is_correct'])) {
-                    $isCorrect = true;
+                if (!empty($opt['is_correct'])) {
+                    $correctOptionIds[] = (string)$opt['id'];
+                }
+            }
+
+            sort($chosenOptIds);
+            sort($correctOptionIds);
+            $isCorrect = ($chosenOptIds === $correctOptionIds);
+        } elseif ($questionType === 'matching') {
+            $matchingPairs = $input['matching_answers'] ?? $input['matchingAnswers'] ?? [];
+            if (!is_array($matchingPairs)) {
+                $matchingPairs = [];
+            }
+            $matchingAnswersToSave = $matchingPairs;
+
+            $allMatched = true;
+            foreach ($officialOptions as $opt) {
+                $expectedMatch = trim((string)($opt['match_text'] ?? ''));
+                $givenMatch = trim((string)($matchingPairs[$opt['id']] ?? ''));
+                if ($expectedMatch !== '' && $expectedMatch !== $givenMatch) {
+                    $allMatched = false;
                     break;
                 }
             }
+            $isCorrect = $allMatched;
         }
-    } elseif ($questionType === 'multiple_answer') {
-        $chosenOptIds = $input['selected_option_ids'] ?? $input['optionIds'] ?? [];
-        if (!is_array($chosenOptIds)) {
-            $chosenOptIds = [];
-        }
-        $chosenOptIds = array_values(array_unique(array_map('sanitize_string', $chosenOptIds)));
-        $selectedOptionIdsToSave = $chosenOptIds;
-
-        $correctOptionIds = [];
-        foreach ($officialOptions as $opt) {
-            if (!empty($opt['is_correct'])) {
-                $correctOptionIds[] = (string)$opt['id'];
-            }
-        }
-
-        sort($chosenOptIds);
-        sort($correctOptionIds);
-        $isCorrect = ($chosenOptIds === $correctOptionIds);
-    } elseif ($questionType === 'matching') {
-        $matchingPairs = $input['matching_answers'] ?? $input['matchingAnswers'] ?? [];
-        if (!is_array($matchingPairs)) {
-            $matchingPairs = [];
-        }
-        $matchingAnswersToSave = $matchingPairs;
-
-        $allMatched = true;
-        foreach ($officialOptions as $opt) {
-            $expectedMatch = trim((string)($opt['match_text'] ?? ''));
-            $givenMatch = trim((string)($matchingPairs[$opt['id']] ?? ''));
-            if ($expectedMatch !== '' && $expectedMatch !== $givenMatch) {
-                $allMatched = false;
-                break;
-            }
-        }
-        $isCorrect = $allMatched;
     }
 
     // Step 7: CALCULATE SCORE & RESPONSE TIME ON SERVER
     $points = (int)($question['points'] ?? 100);
-    $scoreAwarded = $isCorrect ? $points : 0;
+    $scoreAwarded = ($isCorrect && !$isTimeout) ? $points : 0;
 
     // Calculate response time safely
     $responseTimeMs = 0;
@@ -296,31 +323,55 @@ try {
     $newScore = (int)$participant['score'] + $scoreAwarded;
     $newLives = $currentLives;
 
-    if (!$isCorrect && $quizMode === 'santai' && $initialLives > 0) {
+    // Lives decrease ONLY on genuine incorrect answer in santai mode (never on timeout)
+    if (!$isCorrect && !$isTimeout && $quizMode === 'santai' && $initialLives > 0) {
         $newLives = max(0, $newLives - 1);
     }
 
-    // Update question status JSON
-    $qStatus = [];
-    if (!empty($participant['question_status'])) {
-        $decoded = is_string($participant['question_status'])
-            ? json_decode($participant['question_status'], true)
-            : $participant['question_status'];
-        if (is_array($decoded)) {
-            $qStatus = $decoded;
-        }
-    }
-    $qStatus[$questionId] = 'answered';
+    // Update question status JSON (marked as 'skipped' if timeout, 'answered' if valid submission)
+    $qStatus = $currentQStatus;
+    $qStatus[$questionId] = $isTimeout ? 'skipped' : 'answered';
     $jsonQStatus = json_encode($qStatus);
 
+    // Update skipped_questions list
+    $skippedQuestions = [];
+    if (!empty($participant['skipped_questions'])) {
+        $decoded = is_string($participant['skipped_questions'])
+            ? json_decode($participant['skipped_questions'], true)
+            : $participant['skipped_questions'];
+        if (is_array($decoded)) {
+            $skippedQuestions = $decoded;
+        }
+    }
+    if ($isTimeout && !in_array($questionId, $skippedQuestions, true)) {
+        $skippedQuestions[] = $questionId;
+    }
+    $jsonSkipped = json_encode($skippedQuestions);
+
+    // Calculate total questions for completion evaluation
+    $totStmt = $pdo->prepare("SELECT COUNT(*) FROM questions WHERE quiz_id = :quiz_id");
+    $totStmt->execute([':quiz_id' => $participant['quiz_id']]);
+    $totalQuestions = (int)$totStmt->fetchColumn();
+
     $newProgress = (int)($participant['current_progress'] ?? 0) + 1;
-    $isCompleted = ($newLives === 0 && $quizMode === 'santai' && $initialLives > 0) ? 1 : 0;
+    $processedCount = count($qStatus);
+
+    // Determine completion status
+    $isCompleted = 0;
+    if (!empty($participant['is_completed'])) {
+        $isCompleted = 1;
+    } elseif ($newLives === 0 && $quizMode === 'santai' && $initialLives > 0) {
+        $isCompleted = 1;
+    } elseif ($totalQuestions > 0 && ($newProgress >= $totalQuestions || $processedCount >= $totalQuestions)) {
+        $isCompleted = 1;
+    }
 
     $updPartStmt = $pdo->prepare("
         UPDATE participants
         SET score = :score,
             lives = :lives,
             question_status = :q_status,
+            skipped_questions = :skipped,
             current_progress = :progress,
             is_completed = :is_comp
         WHERE id = :pid
@@ -329,12 +380,41 @@ try {
         ':score'    => $newScore,
         ':lives'    => $newLives,
         ':q_status' => $jsonQStatus,
+        ':skipped'  => $jsonSkipped,
         ':progress' => $newProgress,
         ':is_comp'  => $isCompleted,
         ':pid'      => $participantId,
     ]);
 
-    // Step 9: SAVE ANSWER IN TRANSACTION
+    // Step 9: HANDLE TIMEOUT VS NORMAL ANSWER STORAGE
+    if ($isTimeout) {
+        // Do NOT insert into answers table for timeout (prevent false incorrect answers)
+        $selPart = $pdo->prepare("SELECT * FROM participants WHERE id = :id LIMIT 1");
+        $selPart->execute([':id' => $participantId]);
+        $updatedParticipant = $selPart->fetch();
+
+        // COMMIT TRANSACTION
+        $pdo->commit();
+
+        $timeoutResult = [
+            'id'                  => 'timeout-' . $questionId . '-' . time(),
+            'participant_id'      => (string)$participantId,
+            'question_id'         => (string)$questionId,
+            'selected_option_id'  => null,
+            'selected_option_ids' => null,
+            'matching_answers'    => null,
+            'is_correct'          => false,
+            'is_timeout'          => true,
+            'status'              => 'skipped',
+            'response_time_ms'    => $responseTimeMs,
+            'score_awarded'       => 0,
+            'answered_at'         => date('Y-m-d H:i:s'),
+            'participant'         => format_participant_row($updatedParticipant),
+        ];
+
+        send_json_response($timeoutResult, 201);
+    }
+
     $answerId = sanitize_string($input['id'] ?? generate_uuid());
     $jsonOptIds = $selectedOptionIdsToSave !== null ? json_encode($selectedOptionIdsToSave) : null;
     $jsonMatches = $matchingAnswersToSave !== null ? json_encode($matchingAnswersToSave) : null;

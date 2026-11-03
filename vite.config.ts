@@ -66,6 +66,13 @@ export default defineConfig({
           });
         }
       },
+      '/realtime': {
+        target: 'http://127.0.0.1',
+        changeOrigin: true,
+        headers: {
+          Host: 'evaluasi-bakcip.test',
+        },
+      },
       '/uploads': {
         target: 'http://127.0.0.1',
         changeOrigin: true,

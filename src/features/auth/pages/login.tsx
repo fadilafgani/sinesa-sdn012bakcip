@@ -6,14 +6,22 @@ import { SettingsService } from '@/features/settings/services/settings.service';
 import { apiClient } from '@/core/api-client';
 import type { UserRole } from '@/types';
 import { motion } from 'framer-motion';
-import { KeyRound, Mail, User, Shield, GraduationCap, School, AlertCircle, CheckCircle, Download, X } from 'lucide-react';
+import { 
+  KeyRound, Mail, User, Shield, GraduationCap, School, 
+  AlertCircle, CheckCircle, Download, X, Hash, Gamepad2, Lock 
+} from 'lucide-react';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
+import { usePlayStore } from '@/features/session/stores/play-store';
+import { useUiStore } from '@/shared/stores/ui-store';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { isMock, loginMock, user, profile } = useAuthStore();
 
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [authTab, setAuthTab] = useState<'login' | 'register' | 'guest'>('login');
+  const isSignUp = authTab === 'register';
+  const setIsSignUp = (val: boolean) => setAuthTab(val ? 'register' : 'login');
+
   const [role, setRole] = useState<UserRole>('student');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,6 +31,13 @@ export const Login: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [registrationEnabled, setRegistrationEnabled] = useState(true);
+  const [allowGuestParticipants, setAllowGuestParticipants] = useState(true);
+
+  // Guest join states (UAT-033)
+  const [guestPin, setGuestPin] = useState('');
+  const [guestDisplayName, setGuestDisplayName] = useState('');
+  const [guestLoading, setGuestLoading] = useState(false);
+  const [guestError, setGuestError] = useState<string | null>(null);
 
   // PWA installation states
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -66,19 +81,17 @@ export const Login: React.FC = () => {
     setDeferredPrompt(null);
   };
 
-  // Check if self-registration is enabled from DB or mock settings
+  // Check if self-registration and guest access are enabled from DB or mock settings
   useEffect(() => {
     const checkRegistrationSetting = async () => {
       if (isMock) {
         try {
           const savedSettings = JSON.parse(localStorage.getItem('mock_system_settings') || '{}');
-          if (savedSettings.registration_enabled === 'false') {
-            setRegistrationEnabled(false);
-          } else {
-            setRegistrationEnabled(true);
-          }
+          setRegistrationEnabled(savedSettings.registration_enabled !== 'false');
+          setAllowGuestParticipants(savedSettings.allow_guest_participants !== 'false');
         } catch (e) {
           setRegistrationEnabled(true);
+          setAllowGuestParticipants(true);
         }
       } else {
         try {
@@ -86,11 +99,15 @@ export const Login: React.FC = () => {
           if (res.success && res.data) {
             const regSetting = res.data.find(s => s.key === 'registration_enabled');
             setRegistrationEnabled(!regSetting || regSetting.value !== 'false');
+            const guestSetting = res.data.find(s => s.key === 'allow_guest_participants');
+            setAllowGuestParticipants(!guestSetting || guestSetting.value !== 'false');
           } else {
             setRegistrationEnabled(true);
+            setAllowGuestParticipants(true);
           }
         } catch (e) {
           setRegistrationEnabled(true);
+          setAllowGuestParticipants(true);
         }
       }
     };
@@ -103,9 +120,21 @@ export const Login: React.FC = () => {
     const qEmail = params.get('email');
     const qPass = params.get('password');
     const qRole = params.get('role');
+    const qTab = params.get('tab');
+    const qPin = params.get('pin');
+    const qName = params.get('name');
+
     if (qEmail) setEmail(qEmail);
     if (qPass) setPassword(qPass);
     if (qRole) setRole(qRole as UserRole);
+
+    if (qTab === 'guest' || params.get('guest') === 'true' || qPin) {
+      setAuthTab('guest');
+      if (qPin) setGuestPin(qPin);
+      if (qName) setGuestDisplayName(qName);
+    } else if (qTab === 'register' || params.get('signup') === 'true') {
+      setAuthTab('register');
+    }
 
     if (params.get('auto_submit') === 'true' && qEmail && qPass) {
       setTimeout(() => {
@@ -114,6 +143,53 @@ export const Login: React.FC = () => {
       }, 300);
     }
   }, []);
+
+  // Guest join submit handler (UAT-033)
+  const handleGuestJoin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGuestError(null);
+
+    if (!allowGuestParticipants) {
+      setGuestError('Partisipan tamu dinonaktifkan oleh Administrator. Silakan masuk menggunakan akun murid.');
+      return;
+    }
+
+    const cleanPin = guestPin.trim();
+    const cleanName = guestDisplayName.trim();
+
+    if (!cleanPin) {
+      setGuestError('Kode PIN kuis wajib diisi.');
+      return;
+    }
+    if (cleanPin.length < 5) {
+      setGuestError('Kode PIN kuis minimal 5-6 karakter.');
+      return;
+    }
+    if (!cleanName) {
+      setGuestError('Nama tampilan wajib diisi.');
+      return;
+    }
+    if (cleanName.length < 2) {
+      setGuestError('Nama tampilan minimal 2 karakter.');
+      return;
+    }
+
+    setGuestLoading(true);
+    try {
+      const joinSession = usePlayStore.getState().joinSession;
+      const success = await joinSession(cleanPin, cleanName);
+      if (success) {
+        navigate(`/student/play-session?pin=${encodeURIComponent(cleanPin)}&name=${encodeURIComponent(cleanName)}`);
+      } else {
+        const uiErr = useUiStore.getState().error;
+        setGuestError(uiErr || 'Kuis tidak ditemukan atau sesi belum dimulai oleh guru.');
+      }
+    } catch (err: any) {
+      setGuestError(err.message || 'Gagal bergabung ke room kuis.');
+    } finally {
+      setGuestLoading(false);
+    }
+  };
 
   // Automatically redirect if already logged in with an active access token
   useEffect(() => {
@@ -321,6 +397,47 @@ export const Login: React.FC = () => {
 
         {/* Auth Box glass container */}
         <div className="glass-panel rounded-3xl p-8 shadow-xl">
+          {/* Tab Switcher: Masuk | Daftar | Tamu */}
+          <div className="mb-6 grid grid-cols-3 gap-1.5 p-1 rounded-2xl bg-muted/50 border border-border">
+            <button
+              type="button"
+              id="tab-login-btn"
+              onClick={() => { setAuthTab('login'); setError(null); setGuestError(null); }}
+              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+                authTab === 'login'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Masuk
+            </button>
+            <button
+              type="button"
+              id="tab-register-btn"
+              onClick={() => { setAuthTab('register'); setError(null); setGuestError(null); }}
+              className={`py-2 text-xs font-bold rounded-xl transition-all ${
+                authTab === 'register'
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Daftar
+            </button>
+            <button
+              type="button"
+              id="tab-guest-btn"
+              onClick={() => { setAuthTab('guest'); setError(null); setGuestError(null); }}
+              className={`py-2 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+                authTab === 'guest'
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-primary hover:text-primary/90'
+              }`}
+            >
+              <Gamepad2 className="h-3.5 w-3.5" />
+              Tamu
+            </button>
+          </div>
+
           {isMock && (
             <div className="mb-5 flex gap-2.5 rounded-2xl border border-amber-500/20 bg-amber-500/10 p-3.5 text-xs text-amber-600 dark:text-amber-400">
               <AlertCircle className="h-5 w-5 shrink-0" />
@@ -336,158 +453,276 @@ export const Login: React.FC = () => {
             </div>
           )}
 
-          <h2 className="text-xl font-bold mb-6 text-foreground text-center">
-            {isSignUp ? 'Buat Akun Baru' : 'Masuk ke Platform'}
-          </h2>
-
-          {error && (
-            <div className="mb-4 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive font-medium flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 shrink-0" />
-              <span>{successMessage}</span>
-            </div>
-          )}
-
-          <form onSubmit={handleAuth} className="space-y-4">
-            {isSignUp && (
+          {authTab === 'guest' ? (
+            /* GUEST FORM (UAT-033) */
+            !allowGuestParticipants ? (
+              <div className="text-center py-4 space-y-4">
+                <div className="h-12 w-12 rounded-full bg-destructive/15 text-destructive mx-auto flex items-center justify-center">
+                  <Lock className="h-6 w-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-destructive">Partisipan Tamu Dinonaktifkan</h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Administrator telah menonaktifkan fitur partisipan tamu. Silakan masuk menggunakan akun murid Anda untuk mengerjakan kuis.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  id="guest-disabled-back-btn"
+                  onClick={() => setAuthTab('login')}
+                  className="w-full py-3 bg-primary text-primary-foreground rounded-2xl text-xs font-bold shadow-md hover:bg-primary/90 transition-all"
+                >
+                  Kembali ke Form Masuk
+                </button>
+              </div>
+            ) : (
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                  Nama Lengkap
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Contoh: Budi Santoso"
-                    className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
-                    required
-                  />
+                <div className="text-center mb-6">
+                  <h2 className="text-xl font-bold text-foreground">Gabung Kuis sebagai Tamu</h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Masukkan PIN Kuis dari guru dan nama Anda tanpa perlu registrasi akun
+                  </p>
+                </div>
+
+                {guestError && (
+                  <div className="mb-4 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive font-medium flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{guestError}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleGuestJoin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      PIN Kuis (6 Digit)
+                    </label>
+                    <div className="relative">
+                      <Hash className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        id="guest-pin-input"
+                        type="text"
+                        value={guestPin}
+                        onChange={(e) => setGuestPin(e.target.value.toUpperCase())}
+                        placeholder="Contoh: 123456"
+                        maxLength={10}
+                        className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm font-mono tracking-widest outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20 font-bold"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      Nama Tampilan Anda
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        id="guest-name-input"
+                        type="text"
+                        value={guestDisplayName}
+                        onChange={(e) => setGuestDisplayName(e.target.value)}
+                        placeholder="Contoh: Budi Santoso"
+                        maxLength={50}
+                        className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    id="guest-submit-button"
+                    type="submit"
+                    disabled={guestLoading}
+                    className="w-full mt-6 rounded-2xl bg-primary text-primary-foreground py-3 text-sm font-semibold shadow-lg shadow-primary/25 transition duration-200 hover:bg-primary/95 disabled:opacity-50"
+                  >
+                    {guestLoading ? 'Menghubungkan...' : 'Gabung ke Room Kuis'}
+                  </button>
+                </form>
+
+                <div className="mt-5 text-center text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setAuthTab('login')}
+                    className="text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer"
+                  >
+                    Sudah memiliki akun murid? Masuk di sini
+                  </button>
                 </div>
               </div>
-            )}
+            )
+          ) : (
+            /* LOGIN / REGISTER FORM */
+            <>
+              <h2 className="text-xl font-bold mb-6 text-foreground text-center">
+                {isSignUp ? 'Buat Akun Baru' : 'Masuk ke Platform'}
+              </h2>
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                Alamat Email
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  id="login-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@school.sch.id"
-                  className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  required
-                />
-              </div>
-            </div>
+              {error && (
+                <div className="mb-4 rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive font-medium flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                Kata Sandi
-              </label>
-              <div className="relative">
-                <KeyRound className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  id="login-password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  required
-                />
-              </div>
-            </div>
+              {successMessage && (
+                <div className="mb-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 shrink-0" />
+                  <span>{successMessage}</span>
+                </div>
+              )}
 
-            {/* Role switchers */}
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Peran Pengguna
-              </label>
-              <div className="grid grid-cols-3 gap-2">
+              <form onSubmit={handleAuth} className="space-y-4">
+                {isSignUp && (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                      Nama Lengkap
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Contoh: Budi Santoso"
+                        className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                    Alamat Email
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      id="login-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="name@school.sch.id"
+                      className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                    Kata Sandi
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <input
+                      id="login-password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full rounded-2xl border border-border bg-background/50 pl-10 pr-4 py-3 text-sm outline-none transition duration-200 focus:border-primary focus:ring-2 focus:ring-primary/20"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Role switchers */}
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                    Peran Pengguna
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRole('student')}
+                      className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
+                        role === 'student'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <GraduationCap className="h-5 w-5 mb-1" />
+                      Murid
+                    </button>
+                    <button
+                      id="role-btn-teacher"
+                      type="button"
+                      onClick={() => setRole('teacher')}
+                      className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
+                        role === 'teacher'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <School className="h-5 w-5 mb-1" />
+                      Guru
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRole('admin')}
+                      className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
+                        role === 'admin'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Shield className="h-5 w-5 mb-1" />
+                      Admin
+                    </button>
+                  </div>
+                </div>
+
                 <button
-                  type="button"
-                  onClick={() => setRole('student')}
-                  className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
-                    role === 'student'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                  }`}
+                  id="login-submit-button"
+                  type="submit"
+                  disabled={loading}
+                  className="w-full mt-6 rounded-2xl bg-primary text-primary-foreground py-3 text-sm font-semibold shadow-lg shadow-primary/25 transition duration-200 hover:bg-primary/95 disabled:opacity-50"
                 >
-                  <GraduationCap className="h-5 w-5 mb-1" />
-                  Murid
+                  {loading ? 'Memproses...' : isSignUp ? 'Registrasi Akun' : 'Masuk Sekarang'}
                 </button>
-                <button
-                  id="role-btn-teacher"
-                  type="button"
-                  onClick={() => setRole('teacher')}
-                  className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
-                    role === 'teacher'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  <School className="h-5 w-5 mb-1" />
-                  Guru
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRole('admin')}
-                  className={`flex flex-col items-center justify-center py-2.5 rounded-2xl border text-xs font-semibold transition-all duration-200 ${
-                    role === 'admin'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  <Shield className="h-5 w-5 mb-1" />
-                  Admin
-                </button>
+              </form>
+
+              {/* Direct button to join as guest if guest is enabled */}
+              {allowGuestParticipants && !isSignUp && (
+                <div className="mt-4 pt-4 border-t border-border/50 text-center">
+                  <button
+                    type="button"
+                    id="btn-guest-join-direct"
+                    onClick={() => { setAuthTab('guest'); setError(null); }}
+                    className="w-full py-2.5 rounded-2xl border border-primary/30 bg-primary/5 text-primary text-xs font-bold hover:bg-primary/10 transition-all flex items-center justify-center gap-2 active:scale-95"
+                  >
+                    <Gamepad2 className="h-4 w-4" />
+                    Gabung sebagai Tamu (PIN Kuis)
+                  </button>
+                </div>
+              )}
+
+              {/* Swap Register <-> Login */}
+              <div className="mt-5 text-center text-xs">
+                {isSignUp ? (
+                  <button
+                    onClick={() => setAuthTab('login')}
+                    className="text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer"
+                  >
+                    Sudah memiliki akun? Masuk
+                  </button>
+                ) : registrationEnabled ? (
+                  <button
+                    onClick={() => setAuthTab('register')}
+                    className="text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer"
+                  >
+                    Belum punya akun? Daftar gratis
+                  </button>
+                ) : (
+                  <span className="text-muted-foreground font-medium">
+                    🔒 Pendaftaran akun dinonaktifkan oleh Administrator.
+                  </span>
+                )}
               </div>
-            </div>
-
-            <button
-              id="login-submit-button"
-              type="submit"
-              disabled={loading}
-              className="w-full mt-6 rounded-2xl bg-primary text-primary-foreground py-3 text-sm font-semibold shadow-lg shadow-primary/25 transition duration-200 hover:bg-primary/95 disabled:opacity-50"
-            >
-              {loading ? 'Memproses...' : isSignUp ? 'Registrasi Akun' : 'Masuk Sekarang'}
-            </button>
-          </form>
-
-          {/* Swap Register <-> Login */}
-          <div className="mt-5 text-center text-xs">
-            {isSignUp ? (
-              <button
-                onClick={() => setIsSignUp(false)}
-                className="text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer"
-              >
-                Sudah memiliki akun? Masuk
-              </button>
-            ) : registrationEnabled ? (
-              <button
-                onClick={() => setIsSignUp(true)}
-                className="text-primary font-semibold hover:underline bg-transparent border-none cursor-pointer"
-              >
-                Belum punya akun? Daftar gratis
-              </button>
-            ) : (
-              <span className="text-muted-foreground font-medium">
-                🔒 Pendaftaran akun dinonaktifkan oleh Administrator.
-              </span>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Footer */}

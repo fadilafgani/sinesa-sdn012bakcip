@@ -1,5 +1,5 @@
 import { useEffect, lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { Login } from '@/features/auth/pages/login';
 import { ProtectedRoute } from '@/app/router/protected-route';
@@ -25,6 +25,12 @@ const ProfileRedirect = () => {
     return <Navigate to="/teacher/dashboard" replace />;
   }
   return <Navigate to="/student/profile" replace />;
+};
+
+// ponytail: Route redirector preserving search parameters when accessing /play alias
+const PlayRedirect = () => {
+  const location = useLocation();
+  return <Navigate to={{ pathname: '/student/play-session', search: location.search }} replace />;
 };
 
 function App() {
@@ -163,11 +169,13 @@ function App() {
             <Route
               path="/student/play-session"
               element={
-                <ProtectedRoute allowedRoles={['student', 'admin']}>
+                <ProtectedRoute allowedRoles={['student', 'admin']} allowGuest>
                   <PlaySession />
                 </ProtectedRoute>
               }
             />
+            <Route path="/join" element={<Navigate to="/login?tab=guest" replace />} />
+            <Route path="/play" element={<PlayRedirect />} />
 
             {/* Generic Profile & Account Aliases */}
             <Route

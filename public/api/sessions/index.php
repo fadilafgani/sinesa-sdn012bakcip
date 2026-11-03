@@ -22,6 +22,13 @@ handle_cors_preflight();
 $pdo = get_db();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+function format_dt_utc(?string $dtStr): ?string {
+    if (!$dtStr) return null;
+    $ts = strtotime($dtStr);
+    if ($ts === false) return null;
+    return gmdate('Y-m-d\TH:i:s\Z', $ts);
+}
+
 /**
  * Format a quiz_session database row into typed JSON contract
  */
@@ -33,8 +40,12 @@ function format_session_row(array $row): array {
         'status'                   => (string)($row['status'] ?? 'lobby'),
         'current_stage'            => (string)($row['current_stage'] ?? 'waiting'),
         'current_question_index'   => (int)($row['current_question_index'] ?? -1),
-        'question_started_at'      => $row['question_started_at'] !== null ? (string)$row['question_started_at'] : null,
-        'question_expires_at'      => $row['question_expires_at'] !== null ? (string)$row['question_expires_at'] : null,
+        'countdown_started_at'     => format_dt_utc($row['countdown_started_at'] ?? null),
+        'countdown_expires_at'     => format_dt_utc($row['countdown_expires_at'] ?? null),
+        'countdown_duration'       => (int)($row['countdown_duration'] ?? 3),
+        'server_time'              => round(microtime(true) * 1000),
+        'question_started_at'      => format_dt_utc($row['question_started_at'] ?? null),
+        'question_expires_at'      => format_dt_utc($row['question_expires_at'] ?? null),
         'quiz_mode'                => (string)($row['quiz_mode'] ?? 'serius'),
         'lives_count'              => (int)($row['lives_count'] ?? 3),
         'show_final_result'        => (bool)($row['show_final_result'] ?? 1),
@@ -67,7 +78,7 @@ try {
 
         // 1. Get single session by ID
         if ($id !== '') {
-            $stmt = $pdo->prepare("SELECT * FROM quiz_sessions WHERE id = :id LIMIT 1");
+            $stmt = $pdo->prepare("SELECT s.*, q.teacher_id FROM quiz_sessions s LEFT JOIN quizzes q ON s.quiz_id = q.id WHERE s.id = :id LIMIT 1");
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
 
@@ -75,7 +86,30 @@ try {
                 send_error_response('Sesi kuis tidak ditemukan.', 404);
             }
 
+            // Authorization: If user is teacher, enforce ownership (host_id or quiz teacher_id must match)
+            $auth = get_optional_auth();
+            $userId = (string)($auth['sub'] ?? '');
+            $userRole = (string)($auth['role'] ?? '');
+
+            if ($userRole === 'teacher' && (string)$row['host_id'] !== $userId && (string)($row['teacher_id'] ?? '') !== $userId) {
+                send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.', 403);
+            }
+
             send_success_response(format_session_row($row));
+        }
+
+        // Check ownership when a teacher queries by quiz_id
+        $auth = get_optional_auth();
+        $userId = (string)($auth['sub'] ?? '');
+        $userRole = (string)($auth['role'] ?? '');
+
+        if ($quizId !== '' && $userRole === 'teacher') {
+            $qAuthStmt = $pdo->prepare("SELECT teacher_id FROM quizzes WHERE id = :qid LIMIT 1");
+            $qAuthStmt->execute([':qid' => $quizId]);
+            $quizMeta = $qAuthStmt->fetch();
+            if ($quizMeta && (string)$quizMeta['teacher_id'] !== $userId) {
+                send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.', 403);
+            }
         }
 
         // 2. Query session IDs for a quiz (SessionService.getQuizSessionIds)
@@ -159,6 +193,19 @@ try {
             if ($quizId === '') {
                 send_error_response('Parameter quiz_id wajib diisi untuk mengakhiri sesi.', 400);
             }
+            $auth = require_role(['teacher', 'admin']);
+            $userId = (string)($auth['sub'] ?? '');
+            $userRole = (string)($auth['role'] ?? '');
+
+            if ($userRole === 'teacher') {
+                $qStmt = $pdo->prepare("SELECT teacher_id FROM quizzes WHERE id = :qid LIMIT 1");
+                $qStmt->execute([':qid' => $quizId]);
+                $quizRow = $qStmt->fetch();
+                if ($quizRow && (string)$quizRow['teacher_id'] !== $userId) {
+                    send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakhiri sesi kuis milik guru lain.', 403);
+                }
+            }
+
             $now = date('Y-m-d H:i:s');
             $stmt = $pdo->prepare("
                 UPDATE quiz_sessions 
@@ -166,6 +213,11 @@ try {
                 WHERE quiz_id = :quiz_id AND status IN ('lobby', 'active')
             ");
             $stmt->execute([':now' => $now, ':quiz_id' => $quizId]);
+            $pdo->prepare("
+                UPDATE participants 
+                SET is_completed = 1 
+                WHERE session_id IN (SELECT id FROM quiz_sessions WHERE quiz_id = :quiz_id) AND is_completed = 0
+            ")->execute([':quiz_id' => $quizId]);
             send_success_response(['terminated' => $stmt->rowCount()]);
         }
 
@@ -175,18 +227,31 @@ try {
             if (!is_array($ids) || empty($ids)) {
                 send_error_response('Daftar ID sesi wajib berupa array dan tidak boleh kosong.', 400);
             }
+            $auth = require_role(['teacher', 'admin']);
+            $userId = (string)($auth['sub'] ?? '');
+            $userRole = (string)($auth['role'] ?? '');
+
             $now = date('Y-m-d H:i:s');
             $cleanIds = array_values(array_filter(array_map('sanitize_string', $ids)));
             if (empty($cleanIds)) {
                 send_success_response(['terminated' => 0]);
             }
             $placeholders = implode(',', array_fill(0, count($cleanIds), '?'));
-            $stmt = $pdo->prepare("
-                UPDATE quiz_sessions 
-                SET status = 'completed', completed_at = ? 
-                WHERE id IN ($placeholders)
-            ");
-            $stmt->execute(array_merge([$now], $cleanIds));
+            if ($userRole === 'teacher') {
+                $stmt = $pdo->prepare("
+                    UPDATE quiz_sessions 
+                    SET status = 'completed', completed_at = ? 
+                    WHERE id IN ($placeholders) AND host_id = ?
+                ");
+                $stmt->execute(array_merge([$now], $cleanIds, [$userId]));
+            } else {
+                $stmt = $pdo->prepare("
+                    UPDATE quiz_sessions 
+                    SET status = 'completed', completed_at = ? 
+                    WHERE id IN ($placeholders)
+                ");
+                $stmt->execute(array_merge([$now], $cleanIds));
+            }
             send_success_response(['terminated' => $stmt->rowCount()]);
         }
 
@@ -338,6 +403,11 @@ try {
                 WHERE quiz_id = :quiz_id AND status IN ('lobby', 'active')
             ");
             $stmt->execute([':now' => $now, ':quiz_id' => $quizId]);
+            $pdo->prepare("
+                UPDATE participants 
+                SET is_completed = 1 
+                WHERE session_id IN (SELECT id FROM quiz_sessions WHERE quiz_id = :quiz_id) AND is_completed = 0
+            ")->execute([':quiz_id' => $quizId]);
             send_success_response(['terminated' => $stmt->rowCount()]);
         }
 
@@ -393,6 +463,44 @@ try {
                 : 'waiting';
             $fields[] = "`current_stage` = :current_stage";
             $params[':current_stage'] = $stageVal;
+
+            // ponytail: When switching to 'countdown', set shared countdown start and expiry timestamps on server
+            if ($stageVal === 'countdown') {
+                $duration = isset($input['countdown_duration']) ? max(1, min(10, (int)$input['countdown_duration'])) : 3;
+                $nowMicro = microtime(true);
+                $cStartedAt = isset($input['countdown_started_at']) && $input['countdown_started_at'] !== null
+                    ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_started_at']))
+                    : date('Y-m-d H:i:s.v', (int)$nowMicro);
+                $cExpiresAt = isset($input['countdown_expires_at']) && $input['countdown_expires_at'] !== null
+                    ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_expires_at']))
+                    : date('Y-m-d H:i:s.v', (int)($nowMicro + $duration));
+
+                $fields[] = "`countdown_started_at` = :countdown_started_at";
+                $params[':countdown_started_at'] = $cStartedAt;
+                $fields[] = "`countdown_expires_at` = :countdown_expires_at";
+                $params[':countdown_expires_at'] = $cExpiresAt;
+                $fields[] = "`countdown_duration` = :countdown_duration";
+                $params[':countdown_duration'] = $duration;
+            }
+        }
+
+        if (array_key_exists('countdown_started_at', $input) && !isset($params[':countdown_started_at'])) {
+            $fields[] = "`countdown_started_at` = :countdown_started_at";
+            $params[':countdown_started_at'] = $input['countdown_started_at'] !== null
+                ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_started_at']))
+                : null;
+        }
+
+        if (array_key_exists('countdown_expires_at', $input) && !isset($params[':countdown_expires_at'])) {
+            $fields[] = "`countdown_expires_at` = :countdown_expires_at";
+            $params[':countdown_expires_at'] = $input['countdown_expires_at'] !== null
+                ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_expires_at']))
+                : null;
+        }
+
+        if (isset($input['countdown_duration']) && !isset($params[':countdown_duration'])) {
+            $fields[] = "`countdown_duration` = :countdown_duration";
+            $params[':countdown_duration'] = max(1, min(10, (int)$input['countdown_duration']));
         }
 
         if (isset($input['current_question_index'])) {
@@ -440,6 +548,11 @@ try {
         $sql = "UPDATE quiz_sessions SET " . implode(', ', $fields) . " WHERE id = :id";
         $updStmt = $pdo->prepare($sql);
         $updStmt->execute($params);
+
+        // Mark all participants completed when session is finished or completed
+        if ($action === 'finish' || ($params[':status'] ?? '') === 'completed' || ($params[':current_stage'] ?? '') === 'finished') {
+            $pdo->prepare("UPDATE participants SET is_completed = 1 WHERE session_id = :id AND is_completed = 0")->execute([':id' => $id]);
+        }
 
         // Fetch refreshed session row
         $refStmt = $pdo->prepare("SELECT * FROM quiz_sessions WHERE id = :id LIMIT 1");

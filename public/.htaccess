@@ -32,6 +32,7 @@
   # Route /api/realtime/stream to /api/realtime/stream.php with LiteSpeed/Apache no-buffering
   SetEnvIf Request_URI "realtime" no-gzip=1
   RewriteRule ^api/realtime/stream/?$ api/realtime/stream.php [L,QSA,E=noabort:1,E=nobs:1]
+  RewriteRule ^realtime/stream/?$ api/realtime/stream.php [L,QSA,E=noabort:1,E=nobs:1]
 
   # Route /api/admin/users to /api/admin/users.php
   RewriteRule ^api/admin/users/?$ api/admin/users.php [L,QSA]

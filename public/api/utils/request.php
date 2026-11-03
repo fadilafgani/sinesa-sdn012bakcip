@@ -62,7 +62,7 @@ function get_query_param(string $key, $default = null) {
 function get_bearer_token(): ?string {
     $header = null;
 
-    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_AUTHORIZATION'] as $key) {
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_AUTHORIZATION', 'HTTP_X_ACCESS_TOKEN'] as $key) {
         if (!empty($_SERVER[$key])) {
             $header = (string)$_SERVER[$key];
             break;
@@ -72,7 +72,8 @@ function get_bearer_token(): ?string {
     if (!$header && function_exists('apache_request_headers')) {
         $apacheHeaders = apache_request_headers();
         foreach ($apacheHeaders as $k => $v) {
-            if (strtolower((string)$k) === 'authorization') {
+            $kLower = strtolower((string)$k);
+            if ($kLower === 'authorization' || $kLower === 'x-authorization' || $kLower === 'x-access-token') {
                 $header = $v;
                 break;
             }
@@ -82,11 +83,23 @@ function get_bearer_token(): ?string {
     if (!$header && function_exists('getallheaders')) {
         $headers = getallheaders();
         foreach ($headers as $k => $v) {
-            if (strtolower((string)$k) === 'authorization') {
+            $kLower = strtolower((string)$k);
+            if ($kLower === 'authorization' || $kLower === 'x-authorization' || $kLower === 'x-access-token') {
                 $header = $v;
                 break;
             }
         }
+    }
+
+    // Fallback: check query parameter or cookie
+    if (!$header && !empty($_GET['token'])) {
+        return (string)$_GET['token'];
+    }
+    if (!$header && !empty($_GET['access_token'])) {
+        return (string)$_GET['access_token'];
+    }
+    if (!$header && !empty($_COOKIE['access_token'])) {
+        return (string)$_COOKIE['access_token'];
     }
 
     if (!$header || !is_string($header)) {
@@ -95,6 +108,11 @@ function get_bearer_token(): ?string {
 
     if (preg_match('/Bearer\s+(.*)$/i', trim($header), $matches)) {
         return trim($matches[1]);
+    }
+
+    // If sent as raw token without 'Bearer ' prefix
+    if (!empty($header) && strlen($header) > 20) {
+        return trim($header);
     }
 
     return null;

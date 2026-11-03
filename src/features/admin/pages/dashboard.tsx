@@ -27,7 +27,8 @@ import {
   ChevronLeft,
   ChevronRight,
   UploadCloud,
-  Menu
+  Menu,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -35,12 +36,19 @@ import { showConfirm, showError, showSuccess } from '@/shared/utils/swal';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from 'recharts';
 import { LazyImage } from '@/shared/components/lazy-image';
 import { mediaStorageService } from '@/shared/services/media-storage';
+import { useAdminStore } from '@/features/admin/stores/admin-store';
 
 export const AdminDashboard: React.FC = () => {
   const { signOut, isMock, profile: adminProfile } = useAuthStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'quizzes' | 'logs' | 'settings'>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Zustand Admin Store selectors (RT-04, RT-06, RT-07)
+  const stats = useAdminStore((s) => s.stats);
+  const loadingStats = useAdminStore((s) => s.loadingStats);
+  const statsError = useAdminStore((s) => s.statsError);
+  const fetchStats = useAdminStore((s) => s.fetchStats);
 
   // Unified Loading States
   const [loading, setLoading] = useState(true);
@@ -265,10 +273,55 @@ export const AdminDashboard: React.FC = () => {
       ];
       setUserSessions(defaultUserSessions);
 
+      // Populate mock stats into Zustand store
+      useAdminStore.getState().setStats({
+        users: {
+          total: allProfiles.length,
+          teachers: allProfiles.filter(p => p.role === 'teacher').length,
+          students: allProfiles.filter(p => p.role === 'student').length,
+          admins: allProfiles.filter(p => p.role === 'admin').length,
+          active: allProfiles.filter(p => p.status === 'active').length,
+          inactive: allProfiles.filter(p => p.status === 'inactive').length,
+        },
+        quizzes: {
+          total: allQuizzes.length || 2,
+          active: Math.max(1, (allQuizzes.length || 2) - 1),
+          inactive: 1,
+        },
+        sessions: {
+          total: activeSessions.length || 1,
+          lobby: 1,
+          active: 0,
+          completed: 0,
+        },
+        gameplay: {
+          total_participants: 28,
+          total_answers: 142,
+          correct_answers: 118,
+          average_score: 83.1,
+        },
+        storage: {
+          total_files: 12,
+          total_bytes: 48920,
+        },
+        recent_logs: savedLogs.length > 0 ? savedLogs : defaultLogs,
+        recent_sessions: [],
+        server: {
+          php_version: '8.1.10 (Mock)',
+          server_time: new Date().toISOString(),
+        }
+      });
+
       setLoading(false);
     } else {
       // PHP REST API flow
       try {
+        // Fetch stats & telemetry via Zustand store (RT-04, RT-06)
+        const statsData = await useAdminStore.getState().fetchStats(true);
+        if (statsData?.recent_logs) {
+          setLogs(statsData.recent_logs);
+        }
+
         // Fetch profiles
         const profRes = await AdminService.getUsers();
         if (profRes.success && profRes.data) setProfiles(profRes.data);
@@ -280,14 +333,6 @@ export const AdminDashboard: React.FC = () => {
         // Fetch sessions
         const sessRes = await SessionService.getAllSessions();
         if (sessRes.success && sessRes.data) setSessions(sessRes.data);
-
-        // Fetch stats & telemetry (includes recent activity logs)
-        const statsRes = await AdminService.getStats();
-        if (statsRes.success && statsRes.data) {
-          if (statsRes.data.recent_logs) {
-            setLogs(statsRes.data.recent_logs);
-          }
-        }
 
         // Fetch system settings
         const settsRes = await AdminService.getSettings();
@@ -370,22 +415,25 @@ export const AdminDashboard: React.FC = () => {
     return () => clearInterval(interval);
   }, [isMock, loading]);
 
-  // Periodic polling for online dashboard logs & sessions (every 10s)
+  // Periodic polling for online dashboard stats, logs & sessions (every 5s - RT-04, AC-05)
   useEffect(() => {
     if (isMock || loading) return;
 
     const interval = setInterval(async () => {
+      // Pause polling when browser tab is inactive to prevent excessive background requests (AC-08)
+      if (typeof document !== 'undefined' && document.hidden) return;
+
       try {
-        const statsRes = await AdminService.getStats();
-        if (statsRes.success && statsRes.data?.recent_logs) {
-          setLogs(statsRes.data.recent_logs);
+        const statsData = await useAdminStore.getState().fetchStats(false);
+        if (statsData?.recent_logs) {
+          setLogs(statsData.recent_logs);
         }
         const sessRes = await SessionService.getAllSessions();
         if (sessRes.success && sessRes.data) {
           setSessions(sessRes.data);
         }
       } catch (_) {}
-    }, 10000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [isMock, loading]);
@@ -460,6 +508,8 @@ export const AdminDashboard: React.FC = () => {
       }
 
       setUserForm(prev => ({ ...prev, avatarUrl: result.url }));
+      // Refresh storage metrics after upload (RT-05)
+      useAdminStore.getState().fetchStats(true);
     } catch (err: any) {
       console.error('Avatar upload error:', err);
       showError('Gagal', `Gagal mengunggah foto profil: ${err.message}`);
@@ -566,6 +616,7 @@ export const AdminDashboard: React.FC = () => {
         setProfiles(profiles.map(p => p.id === selectedUser.id ? res.data! : p));
         createLog('EDIT_USER', `Mengedit profil pengguna online: ${userForm.fullName} (${selectedUser.id})`);
         showSuccess('Berhasil', 'Data pengguna online diperbarui!');
+        await useAdminStore.getState().fetchStats(true);
       } else {
         // Create new user directly via PHP REST API
         const res = await AdminService.createUser({
@@ -585,6 +636,7 @@ export const AdminDashboard: React.FC = () => {
         setProfiles(prev => [res.data!, ...prev]);
         createLog('ADD_USER', `Menambahkan pengguna online baru: ${userForm.fullName} (${userForm.role})`);
         showSuccess('Berhasil', 'Pengguna online baru berhasil ditambahkan!');
+        await useAdminStore.getState().fetchStats(true);
       }
       setShowAddUserModal(false);
       setShowEditUserModal(false);
@@ -627,6 +679,7 @@ export const AdminDashboard: React.FC = () => {
       setProfiles(profiles.filter(p => p.id !== userId));
       createLog('DELETE_USER', `Menghapus pengguna online: ${name} (${userId})`);
       showSuccess('Berhasil', 'Pengguna online berhasil dihapus dari database!');
+      await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
       showError('Gagal', `Gagal menghapus online: ${err.message}`);
     }
@@ -689,6 +742,7 @@ export const AdminDashboard: React.FC = () => {
       setProfiles(profiles.map(p => p.id === user.id ? { ...p, status: newStatus } : p));
       createLog('TOGGLE_STATUS', `Mengubah status akun online "${user.full_name}" menjadi: ${newStatus}`);
       showSuccess('Berhasil', `Status akun online diubah menjadi: ${newStatus === 'active' ? 'Aktif' : 'Nonaktif'}`);
+      await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
       showError('Gagal', `Gagal mengubah status: ${err.message}`);
     }
@@ -713,6 +767,7 @@ export const AdminDashboard: React.FC = () => {
       setQuizzes(quizzes.map(q => q.id === quiz.id ? { ...q, status: newStatus } : q));
       createLog('TOGGLE_QUIZ_STATUS', `Mengubah status kuis online "${quiz.title}" menjadi: ${newStatus}`);
       showSuccess('Berhasil', `Kuis online diubah menjadi: ${newStatus === 'active' ? 'Aktif' : 'Nonaktif'}`);
+      await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
       showError('Gagal', err.message);
     }
@@ -737,6 +792,7 @@ export const AdminDashboard: React.FC = () => {
       setQuizzes(quizzes.filter(q => q.id !== quiz.id));
       createLog('DELETE_QUIZ', `Menghapus kuis online: ${quiz.title} (${quiz.id})`);
       showSuccess('Berhasil', 'Kuis online berhasil dihapus dari database.');
+      await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
       showError('Gagal', err.message);
     }
@@ -757,6 +813,7 @@ export const AdminDashboard: React.FC = () => {
       if (!res.success) throw new Error(res.error?.message || 'Gagal menyimpan pengaturan');
       createLog('SAVE_SETTINGS', 'Menyimpan konfigurasi pengaturan sistem global online.');
       showSuccess('Berhasil', 'Pengaturan sistem berhasil disimpan online!');
+      await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
       showError('Gagal', err.message);
     }
@@ -841,13 +898,15 @@ export const AdminDashboard: React.FC = () => {
   const totalLogPages = Math.ceil(filteredLogs.length / logsPerPage) || 1;
   const paginatedLogs = filteredLogs.slice((logPage - 1) * logsPerPage, logPage * logsPerPage);
 
-  // Stats computation
-  const totalUsersCount = profiles.length;
-  const totalTeachersCount = profiles.filter(p => p.role === 'teacher').length;
-  const totalStudentsCount = profiles.filter(p => p.role === 'student').length;
-  const totalQuizzesCount = quizzes.length;
-  const totalSessionsCount = sessions.length;
-  const totalActiveUsers = userSessions.filter(s => s.is_online).length;
+  // Stats computation (derived from Zustand store stats with fallback to local state)
+  const totalUsersCount = stats?.users?.total ?? profiles.length;
+  const totalTeachersCount = stats?.users?.teachers ?? profiles.filter(p => p.role === 'teacher').length;
+  const totalStudentsCount = stats?.users?.students ?? profiles.filter(p => p.role === 'student').length;
+  const totalQuizzesCount = stats?.quizzes?.total ?? quizzes.length;
+  const totalSessionsCount = stats?.sessions?.total ?? sessions.length;
+  const totalActiveUsers = stats?.users?.active ?? userSessions.filter(s => s.is_online).length;
+  const totalAnswersProcessed = stats?.gameplay?.total_answers ?? 0;
+  const totalStorageBytes = stats?.storage?.total_bytes ?? 0;
 
   // Chart Data preparation
   const userStatsData = [
@@ -1005,11 +1064,22 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4">
-            {/* System sync indicator */}
-            <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-green-600 tracking-wider">
-              <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-              Live Sync
-            </div>
+            {/* System sync indicator / manual trigger */}
+            <button
+              type="button"
+              onClick={() => fetchStats(true)}
+              data-testid="btn-refresh-stats"
+              disabled={loadingStats}
+              className={`flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full border transition active:scale-95 ${
+                statsError 
+                  ? 'text-destructive border-destructive/30 bg-destructive/10' 
+                  : 'text-green-600 dark:text-green-400 border-green-500/20 bg-green-500/10 hover:bg-green-500/20'
+              }`}
+              title="Klik untuk menyinkronkan data statistik"
+            >
+              <RefreshCw className={`h-3 w-3 ${loadingStats ? 'animate-spin' : ''}`} />
+              <span>{loadingStats ? 'Sync...' : statsError ? 'Sync Error' : 'Live Sync'}</span>
+            </button>
 
             <ThemeToggle />
           </div>
@@ -1035,31 +1105,88 @@ export const AdminDashboard: React.FC = () => {
                 {/* ==================== TAB: DASHBOARD ==================== */}
                 {activeTab === 'dashboard' && (
                   <div className="space-y-8">
+                    {/* Error Banner if Stats fail */}
+                    {statsError && (
+                      <div data-testid="stats-error-banner" className="p-3 rounded-2xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-semibold flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 shrink-0" />
+                          <span>Gagal menyinkronkan statistik: {statsError}</span>
+                        </div>
+                        <button 
+                          onClick={() => fetchStats(true)} 
+                          className="text-[11px] underline font-bold hover:text-foreground"
+                        >
+                          Coba Lagi
+                        </button>
+                      </div>
+                    )}
+
                     {/* Stats Premium Cards Grid */}
-                    <div className="grid grid-cols-2 md:grid-cols-6 gap-6">
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+                    <div data-testid="stats-grid" className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-4">
+                      {/* 1. Total Pengguna */}
+                      <div data-testid="stat-total-users" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Total Pengguna</span>
-                        <h3 className="text-3xl font-black text-foreground leading-none">{totalUsersCount}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-foreground leading-none">{totalUsersCount}</h3>
                       </div>
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+
+                      {/* 2. Total Guru */}
+                      <div data-testid="stat-total-teachers" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Total Guru</span>
-                        <h3 className="text-3xl font-black text-primary leading-none">{totalTeachersCount}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-primary leading-none">{totalTeachersCount}</h3>
                       </div>
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+
+                      {/* 3. Total Murid */}
+                      <div data-testid="stat-total-students" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Total Murid</span>
-                        <h3 className="text-3xl font-black text-yellow-500 leading-none">{totalStudentsCount}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-yellow-500 leading-none">{totalStudentsCount}</h3>
                       </div>
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+
+                      {/* 4. Total Kuis */}
+                      <div data-testid="stat-total-quizzes" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Total Kuis</span>
-                        <h3 className="text-3xl font-black text-green-500 leading-none">{totalQuizzesCount}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-green-500 leading-none">{totalQuizzesCount}</h3>
                       </div>
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+
+                      {/* 5. Sesi Kuis */}
+                      <div data-testid="stat-total-sessions" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Sesi Kuis</span>
-                        <h3 className="text-3xl font-black text-purple-500 leading-none">{totalSessionsCount}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-purple-500 leading-none">{totalSessionsCount}</h3>
                       </div>
-                      <div className="glass-panel p-5 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+
+                      {/* 6. Pengguna Aktif */}
+                      <div data-testid="stat-active-users" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Pengguna Aktif</span>
-                        <h3 className="text-3xl font-black text-rose-500 leading-none">{totalActiveUsers}</h3>
+                        <h3 className="text-2xl lg:text-3xl font-black text-rose-500 leading-none">{totalActiveUsers}</h3>
+                      </div>
+
+                      {/* 7. Jawaban Diproses (AC-01) */}
+                      <div data-testid="stat-processed-answers" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Jawaban Diproses</span>
+                        {loadingStats && !stats ? (
+                          <div className="h-7 w-14 bg-muted/50 animate-pulse rounded-lg" />
+                        ) : statsError && !stats ? (
+                          <span className="text-xs text-destructive font-bold flex items-center gap-1" title={statsError}>
+                            <AlertTriangle className="h-3 w-3 shrink-0" /> Error
+                          </span>
+                        ) : (
+                          <h3 className="text-2xl lg:text-3xl font-black text-cyan-500 leading-none">{totalAnswersProcessed}</h3>
+                        )}
+                      </div>
+
+                      {/* 8. Penyimpanan (AC-02) */}
+                      <div data-testid="stat-storage" className="glass-panel p-4 rounded-3xl border text-left bg-card/30 flex flex-col justify-between min-h-[110px]">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Penyimpanan</span>
+                        {loadingStats && !stats ? (
+                          <div className="h-7 w-20 bg-muted/50 animate-pulse rounded-lg" />
+                        ) : statsError && !stats ? (
+                          <span className="text-xs text-destructive font-bold flex items-center gap-1" title={statsError}>
+                            <AlertTriangle className="h-3 w-3 shrink-0" /> Error
+                          </span>
+                        ) : (
+                          <h3 className="text-xl lg:text-2xl font-black text-emerald-500 leading-none truncate" title={`${totalStorageBytes} Bytes`}>
+                            {totalStorageBytes} Bytes
+                          </h3>
+                        )}
                       </div>
                     </div>
 

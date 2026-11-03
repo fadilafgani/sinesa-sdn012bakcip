@@ -13,18 +13,34 @@ import { sessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell } from 'recharts';
-import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check, ShieldAlert, AlertTriangle, FileQuestion } from 'lucide-react';
+import { Play, Users, Award, ChevronRight, BarChart3, Volume2, Copy, Check, ShieldAlert, AlertTriangle, FileQuestion, CheckCircle2, RefreshCw, AlertCircle } from 'lucide-react';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showConfirm, showError } from '@/shared/utils/swal';
 import { QuizService } from '@/features/quiz/services/quiz.service';
 import { AuthService } from '@/features/auth/services/auth.service';
+import { SessionService } from '@/features/session/services/session.service';
+import { QuestionService } from '@/features/question/services/question.service';
+import { useSessionStore } from '@/features/session/stores/session-store';
+import { useQuestionStore } from '@/features/question/stores/question-store';
 import { LazyImage } from '@/shared/components/lazy-image';
 import { getSafeMediaUrl } from '@/shared/utils/media';
+import { LeaderboardService } from '@/features/leaderboard/services/leaderboard.service';
+import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
+import { useParticipantStore } from '@/features/participant/stores/participant-store';
+
+export type HostState = 'loading' | 'success' | 'access_denied' | 'not_found' | 'error';
+
+export interface HostErrorInfo {
+  title: string;
+  message: string;
+  statusCode?: number;
+}
 
 export const HostSession: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const quizId = searchParams.get('id');
+  const rawId = searchParams.get('id') || searchParams.get('sessionId') || searchParams.get('session_id') || searchParams.get('quizId');
+  const targetId = rawId ? rawId.trim() : '';
 
   const { isMock, profile } = useAuthStore(useShallow(state => ({ isMock: state.isMock, profile: state.profile })));
   const { navigate } = useNavigation();
@@ -49,6 +65,51 @@ export const HostSession: React.FC = () => {
   const { questions, currentQuestion, currentOptions, fetchQuestions } = useQuestion();
   const { participants } = useParticipants();
   const { submissions } = useAnswer();
+  const realtimeStatus = useSessionStore(state => state.realtimeStatus);
+
+  const renderConnectionToast = () => {
+    if (realtimeStatus === 'RECONNECTING' || realtimeStatus === 'CONNECTING') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-bold shadow-xl animate-pulse backdrop-blur">
+          <span className="w-2 h-2 rounded-full bg-black animate-ping" />
+          Menghubungkan ulang ke server...
+        </div>
+      );
+    }
+    if (realtimeStatus === 'RECONNECTED') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-emerald-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur animate-fade-in">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Terhubung kembali
+        </div>
+      );
+    }
+    if (realtimeStatus === 'POLLING_FALLBACK') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-sky-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          Mode pemulihan polling aktif (data tersinkron)
+        </div>
+      );
+    }
+    if (realtimeStatus === 'DISCONNECTED') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-red-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <AlertCircle className="w-3.5 h-3.5" />
+          Koneksi terputus
+        </div>
+      );
+    }
+    if (realtimeStatus === 'ERROR') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <AlertCircle className="w-3.5 h-3.5" />
+          Koneksi terganggu. Menggunakan sinkronisasi cadangan...
+        </div>
+      );
+    }
+    return null;
+  };
 
   console.log('COMPONENT_RENDER', 'HostSession', {
     stage: activeSession?.current_stage,
@@ -91,12 +152,10 @@ export const HostSession: React.FC = () => {
   // Diagnostics State
   const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
   const [lastPollTime, setLastPollTime] = useState<string>('Never');
-  const [initError, setInitError] = useState<{
-    type: 'access_denied' | 'not_found' | 'error';
-    title: string;
-    message: string;
-    statusCode?: number;
-  } | null>(null);
+  
+  // Host Page Lifecycle State Machine
+  const [hostState, setHostState] = useState<HostState>('loading');
+  const [errorInfo, setErrorInfo] = useState<HostErrorInfo | null>(null);
 
   useEffect(() => {
     if (!activeSession?.id || isMock) return;
@@ -108,144 +167,247 @@ export const HostSession: React.FC = () => {
 
   // Initialize Session
   useEffect(() => {
+    let isCancelled = false;
+
     const init = async () => {
-      setInitError(null);
-      if (!quizId) {
-        setInitError({
-          type: 'not_found',
-          title: 'Kuis Tidak Ditemukan',
-          message: 'Parameter ID kuis tidak ditemukan pada tautan.',
+      setHostState('loading');
+      setErrorInfo(null);
+
+      if (!targetId) {
+        setHostState('not_found');
+        setErrorInfo({
+          title: 'Sesi Tidak Ditemukan',
+          message: 'Parameter ID kuis atau ID sesi kuis tidak ditemukan pada tautan.',
           statusCode: 400
         });
         return;
       }
 
-      // Load and verify quiz ownership
-      if (isMock) {
-        const allQuizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
-        const targetQuiz = allQuizzes.find((q: any) => q.id === quizId);
-        if (!targetQuiz) {
-          setInitError({
-            type: 'not_found',
-            title: 'Kuis Tidak Ditemukan',
-            message: 'Kuis mock tidak ditemukan dalam database.',
-            statusCode: 404
-          });
-          return;
-        }
-        if (targetQuiz.teacher_id !== profile?.id) {
-          setInitError({
-            type: 'access_denied',
-            title: 'Akses Ditolak',
-            message: 'Anda tidak memiliki hak untuk memandu kuis milik guru lain!',
-            statusCode: 403
-          });
-          return;
-        }
-      } else {
-        try {
-          await AuthService.refreshSession();
-          const quizRes = await QuizService.getQuizById(quizId);
-          if (!quizRes.success || !quizRes.data) {
-            const is403 = quizRes.status === 403 || 
-              (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('akses ditolak') || quizRes.error.toLowerCase().includes('tidak memiliki izin') || quizRes.error.toLowerCase().includes('forbidden')));
-            const is404 = quizRes.status === 404 || 
-              (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('tidak ditemukan') || quizRes.error.toLowerCase().includes('not found')));
+      try {
+        if (isMock) {
+          // 1. Check mock sessions
+          const allSessions = JSON.parse(localStorage.getItem('sessions') || '[]');
+          const targetSession = allSessions.find((s: any) => s.id === targetId);
+          if (targetSession) {
+            if (targetSession.host_id !== profile?.id && profile?.role !== 'admin') {
+              setHostState('access_denied');
+              setErrorInfo({
+                title: 'Akses Ditolak',
+                message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+                statusCode: 403
+              });
+              return;
+            }
+            useSessionStore.setState({ activeSession: targetSession });
+            setPinCode(targetSession.pin_code || '');
+            setHostState('success');
+            return;
+          }
 
-            setInitError({
-              type: is403 ? 'access_denied' : (is404 ? 'not_found' : 'error'),
-              title: is403 ? 'Akses Ditolak' : (is404 ? 'Kuis Tidak Ditemukan' : 'Gagal Memuat Kuis'),
-              message: typeof quizRes.error === 'string' ? quizRes.error : (is403 ? 'Anda tidak memiliki hak untuk memandu kuis ini.' : 'Terjadi kesalahan saat memverifikasi kuis.'),
-              statusCode: quizRes.status || (is403 ? 403 : (is404 ? 404 : 500))
+          // 2. Check mock quizzes
+          const allQuizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
+          const targetQuiz = allQuizzes.find((q: any) => q.id === targetId);
+          if (!targetQuiz) {
+            setHostState('not_found');
+            setErrorInfo({
+              title: 'Kuis Tidak Ditemukan',
+              message: 'Kuis mock tidak ditemukan dalam database.',
+              statusCode: 404
             });
             return;
           }
 
-          const quizData = quizRes.data;
-          if (quizData.teacher_id !== profile?.id) {
-            setInitError({
-              type: 'access_denied',
+          if (targetQuiz.teacher_id !== profile?.id && profile?.role !== 'admin') {
+            setHostState('access_denied');
+            setErrorInfo({
               title: 'Akses Ditolak',
-              message: 'Anda tidak memiliki hak untuk memandu kuis milik guru lain!',
+              message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
               statusCode: 403
             });
             return;
           }
-        } catch (err: any) {
-          console.error('Error verifying quiz ownership:', err);
-          setInitError({
-            type: 'error',
-            title: 'Kesalahan Sistem',
-            message: err?.message || 'Gagal memverifikasi hak akses kuis.',
-            statusCode: 500
+
+          const pin = await createSession(targetId);
+          if (pin) {
+            setPinCode(pin);
+            setHostState('success');
+          } else {
+            setHostState('error');
+            setErrorInfo({
+              title: 'Gagal Membuka Sesi',
+              message: 'Gagal memulai sesi kuis mock.',
+              statusCode: 500
+            });
+          }
+          return;
+        }
+
+        // Real API Mode
+        await AuthService.refreshSession();
+
+        // 1. Probe if targetId is a session ID
+        const sessionRes = await SessionService.getSession(targetId);
+
+        if (sessionRes.status === 403) {
+          setHostState('access_denied');
+          setErrorInfo({
+            title: 'Akses Ditolak',
+            message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+            statusCode: 403
           });
           return;
         }
-      }
 
-      // If the store already has an active session for this quiz, reuse it
-      const currentSession = activeSession;
-      if (currentSession && currentSession.quiz_id === quizId && currentSession.status !== 'completed') {
-        console.log('HostSession: Reusing existing activeSession in store:', currentSession);
-        if (isMock) {
-          const allQuizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
-          const targetQuiz = allQuizzes.find((q: any) => q.id === quizId);
-          setPinCode(targetQuiz?.pin_code || '');
-        } else {
-          try {
-            const quizRes = await QuizService.getQuizById(quizId);
+        if (sessionRes.success && sessionRes.data) {
+          const sessionData = sessionRes.data;
+          if (profile?.role === 'teacher' && sessionData.host_id !== profile.id) {
+            setHostState('access_denied');
+            setErrorInfo({
+              title: 'Akses Ditolak',
+              message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+              statusCode: 403
+            });
+            return;
+          }
+
+          const quizRes = await QuizService.getQuizById(sessionData.quiz_id);
+          if (quizRes.status === 403) {
+            setHostState('access_denied');
+            setErrorInfo({
+              title: 'Akses Ditolak',
+              message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+              statusCode: 403
+            });
+            return;
+          }
+
+          const questionsRes = await QuestionService.getQuestions(sessionData.quiz_id);
+          const loadedQuestions = questionsRes.success && questionsRes.data ? questionsRes.data : [];
+
+          useSessionStore.setState({ activeSession: sessionData, quiz: quizRes.data || null });
+          useQuestionStore.setState({ questions: loadedQuestions });
+          setPinCode(quizRes.data?.pin_code || '');
+          setHostState('success');
+          return;
+        }
+
+        // If targetId was not a session (404), probe if targetId is a quiz ID
+        if (sessionRes.status === 404 || !sessionRes.success) {
+          if (sessionRes.status && sessionRes.status >= 500) {
+            setHostState('error');
+            setErrorInfo({
+              title: 'Kesalahan Server',
+              message: typeof sessionRes.error === 'string' ? sessionRes.error : 'Terjadi kesalahan pada server saat memuat sesi kuis.',
+              statusCode: sessionRes.status
+            });
+            return;
+          }
+
+          const quizRes = await QuizService.getQuizById(targetId);
+
+          if (quizRes.status === 403 || (typeof quizRes.error === 'string' && (quizRes.error.toLowerCase().includes('akses ditolak') || quizRes.error.toLowerCase().includes('tidak memiliki izin')))) {
+            setHostState('access_denied');
+            setErrorInfo({
+              title: 'Akses Ditolak',
+              message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+              statusCode: 403
+            });
+            return;
+          }
+
+          if (quizRes.status === 404 || !quizRes.success || !quizRes.data) {
+            setHostState('not_found');
+            setErrorInfo({
+              title: 'Sesi Tidak Ditemukan',
+              message: 'Sesi kuis atau kuis dengan ID tersebut tidak ditemukan.',
+              statusCode: 404
+            });
+            return;
+          }
+
+          if (profile?.role === 'teacher' && quizRes.data.teacher_id !== profile.id) {
+            setHostState('access_denied');
+            setErrorInfo({
+              title: 'Akses Ditolak',
+              message: 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.',
+              statusCode: 403
+            });
+            return;
+          }
+
+          // If the store already has an active session for this quiz, reuse it
+          const currentSession = sessionStore.getState().activeSession;
+          if (currentSession && currentSession.quiz_id === targetId && currentSession.status !== 'completed') {
             setPinCode(quizRes.data?.pin_code || '');
-          } catch (err) {
-            console.error('HostSession error fetching quiz pin:', err);
+            setHostState('success');
+            return;
+          }
+
+          const generatedPin = await createSession(targetId);
+          if (generatedPin) {
+            setPinCode(generatedPin);
+            setHostState('success');
+          } else {
+            const curSession = sessionStore.getState().activeSession;
+            if (curSession) {
+              setHostState('success');
+            } else {
+              setHostState('error');
+              setErrorInfo({
+                title: 'Gagal Membuka Sesi',
+                message: 'Tidak dapat memulai atau menghubungkan ke sesi kuis. Pastikan server aktif dan Anda memiliki hak akses.',
+                statusCode: 500
+              });
+            }
           }
         }
-        return;
-      }
-
-      console.log('HostSession: Initializing session for quizId =', quizId);
-      const generatedPin = await createSession(quizId);
-      if (generatedPin) {
-        console.log('HostSession: Session initialized, pin =', generatedPin);
-        setPinCode(generatedPin);
-      } else {
-        console.error('HostSession: Failed to initialize session (createSession returned null)');
-        const curSession = sessionStore.getState().activeSession;
-        if (!curSession) {
-          setInitError({
-            type: 'error',
-            title: 'Gagal Membuka Sesi',
-            message: 'Tidak dapat memulai atau menghubungkan ke sesi kuis. Pastikan server aktif dan Anda memiliki hak akses.',
-            statusCode: 500
-          });
+      } catch (err: any) {
+        console.error('HostSession init caught error:', err);
+        const is403 = err?.status === 403 || err?.statusCode === 403;
+        setHostState(is403 ? 'access_denied' : 'error');
+        setErrorInfo({
+          title: is403 ? 'Akses Ditolak' : 'Kesalahan Sistem',
+          message: is403
+            ? 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.'
+            : (err?.message || 'Terjadi kesalahan tidak terduga saat memverifikasi sesi kuis.'),
+          statusCode: is403 ? 403 : 500
+        });
+      } finally {
+        if (!isCancelled) {
+          // Guarantee loading state always ends
+          setHostState(prev => prev === 'loading' ? 'error' : prev);
         }
       }
     };
+
     init();
 
     return () => {
+      isCancelled = true;
       console.log('HostSession: Cleaning up session...');
       clearSession();
     };
-  }, [quizId]);
+  }, [targetId]);
 
   // Auto-reload questions if they are empty (handles replica lag from editor)
   useEffect(() => {
-    if (activeSession && questions.length === 0 && quizId && !initError) {
+    if (hostState === 'success' && activeSession && questions.length === 0 && targetId) {
       console.log('HostSession: Questions are empty. Starting background check...');
       let attempts = 0;
       const maxAttempts = 5;
       const interval = setInterval(async () => {
         attempts++;
         try {
-          const fetched = await fetchQuestions(quizId);
+          const quizIdToFetch = activeSession.quiz_id || targetId;
+          const fetched = await fetchQuestions(quizIdToFetch);
           if (fetched && fetched.length > 0) {
             console.log('HostSession: Successfully fetched questions in background. Count =', fetched.length);
             clearInterval(interval);
           } else if (attempts >= maxAttempts) {
             console.warn('HostSession: Reached max attempts fetching questions');
             clearInterval(interval);
-            setInitError({
-              type: 'error',
+            setHostState('error');
+            setErrorInfo({
               title: 'Soal Kuis Kosong',
               message: 'Kuis ini belum memiliki soal atau gagal dimuat setelah beberapa percobaan.',
               statusCode: 404
@@ -259,11 +421,11 @@ export const HostSession: React.FC = () => {
       }, 1500);
       return () => clearInterval(interval);
     }
-  }, [activeSession?.id, questions.length, quizId, initError]);
+  }, [hostState, activeSession?.id, questions.length, targetId]);
 
   // Load initial data once and subscribe to Realtime updates
   useEffect(() => {
-    if (!activeSession?.id || isMock) return;
+    if (hostState !== 'success' || !activeSession?.id || isMock) return;
 
     const sessionId = activeSession.id;
     console.log('HostSession: Initializing session subscriptions for ID:', sessionId);
@@ -271,11 +433,25 @@ export const HostSession: React.FC = () => {
     const loadInitialData = async () => {
       try {
         const currentStatus = activeSession?.status;
-        if (currentStatus === 'lobby' || currentStatus === 'active') {
-          await fetchParticipants(sessionId);
-        }
+        await fetchParticipants(sessionId);
         if (currentStatus === 'active') {
           await fetchAnswers(sessionId);
+        }
+        if (currentStatus === 'completed' || activeSession?.current_stage === 'finished') {
+          const lbRes = await LeaderboardService.getLeaderboard(sessionId);
+          if (lbRes.success && lbRes.data) {
+            useLeaderboardStore.setState({ leaderboard: lbRes.data });
+            const pMap = new Map(useParticipantStore.getState().participants.map(p => [p.id, p]));
+            lbRes.data.forEach(lb => {
+              const existing = pMap.get(lb.id);
+              if (existing) {
+                pMap.set(lb.id, { ...existing, score: lb.score, rank: lb.rank });
+              } else {
+                pMap.set(lb.id, lb);
+              }
+            });
+            useParticipantStore.setState({ participants: Array.from(pMap.values()) });
+          }
         }
       } catch (err) {
         console.error('HostSession: Error loading initial data:', err);
@@ -292,19 +468,54 @@ export const HostSession: React.FC = () => {
       console.log('HostSession: Cleaning up subscriptions for ID:', sessionId);
       unsubscribeAll();
     };
-  }, [activeSession?.id, isMock, subscribeToSession, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
+  }, [hostState, activeSession?.id, isMock, subscribeToSession, subscribeToLobby, subscribeToAnswers, unsubscribeAll]);
 
-  // Manage countdown automatically via custom hook
-  const countdown = useCountdown(activeSession?.current_stage === 'countdown' ? 3 : 0, () => {
-    if (activeSession?.current_stage === 'countdown' && activeSession.id) {
-      publishQuestionStage();
+  // ponytail: Authoritative fetch of final participant scores & leaderboard when stage is finished/completed
+  useEffect(() => {
+    if (!activeSession?.id || isMock) return;
+    if (activeSession.current_stage === 'finished' || activeSession.status === 'completed') {
+      fetchParticipants(activeSession.id);
+      LeaderboardService.getLeaderboard(activeSession.id).then(res => {
+        if (res.success && res.data) {
+          useLeaderboardStore.setState({ leaderboard: res.data });
+          const pMap = new Map(useParticipantStore.getState().participants.map(p => [p.id, p]));
+          res.data.forEach(lb => {
+            const existing = pMap.get(lb.id);
+            if (existing) {
+              pMap.set(lb.id, { ...existing, score: lb.score, rank: lb.rank });
+            } else {
+              pMap.set(lb.id, lb);
+            }
+          });
+          useParticipantStore.setState({ participants: Array.from(pMap.values()) });
+        }
+      });
+    }
+  }, [activeSession?.id, activeSession?.current_stage, activeSession?.status, isMock, fetchParticipants]);
+
+  const serverTimeOffset = activeSession?.server_time ? Date.now() - activeSession.server_time : 0;
+
+  // Manage countdown automatically via custom hook (anchored to shared server timestamp)
+  const isCountdownStage = activeSession?.current_stage === 'countdown';
+  const countdown = useCountdown({
+    expiresAt: activeSession?.countdown_expires_at,
+    serverTimeOffset,
+    duration: activeSession?.countdown_duration || 3,
+    enabled: isCountdownStage || (activeSession?.current_stage === 'question' && !!activeSession?.countdown_expires_at),
+    onComplete: () => {
+      if (activeSession?.current_stage === 'countdown' && activeSession.id) {
+        publishQuestionStage();
+      }
     }
   });
+
+  const isCountdownActive = isCountdownStage || (activeSession?.current_stage === 'question' && countdown > 0 && !!activeSession?.countdown_expires_at);
 
   // Handle gameplay question timer via custom hook
   const timer = useTimer({
     expiresAt: activeSession?.question_expires_at || null,
-    enabled: activeSession?.current_stage === 'question' && !!currentQuestion,
+    serverTimeOffset,
+    enabled: activeSession?.current_stage === 'question' && !!currentQuestion && !isCountdownActive,
     onTimeUp: () => {
       handleRevealAnswer();
     }
@@ -325,37 +536,36 @@ export const HostSession: React.FC = () => {
     console.log('HOST_NEXT_STAGE', 'Guru memicu startQuiz');
     if (isStartingGame) return;
     setIsStartingGame(true);
-    console.log('HostSession: handleStartGame clicked. Questions loaded =', questions.length);
+    try {
+      console.log('HostSession: handleStartGame clicked. Questions loaded =', questions.length);
 
-    let currentQuestions = questions;
-    if (currentQuestions.length === 0 && quizId) {
-      console.log('HostSession: Questions are empty on start. Retrying fetch immediately...');
-      const fetched = await fetchQuestions(quizId);
-      if (fetched && fetched.length > 0) {
-        currentQuestions = fetched;
+      let currentQuestions = questions;
+      const quizIdToFetch = activeSession?.quiz_id || targetId;
+      if (currentQuestions.length === 0 && quizIdToFetch) {
+        console.log('HostSession: Questions are empty on start. Retrying fetch immediately...');
+        const fetched = await fetchQuestions(quizIdToFetch);
+        if (fetched && fetched.length > 0) {
+          currentQuestions = fetched;
+        }
       }
-    }
 
-    if (currentQuestions.length === 0) {
-      showError('Soal Kosong', 'Gagal memuat soal kuis dari database. Silakan tunggu beberapa saat agar database siap, lalu klik Mulai Kuis lagi.');
-      setIsStartingGame(false);
-      return;
-    }
-
-    if (participants.length === 0 && !isMock) {
-      const confirmRes = await showConfirm(
-        'Mulai Kuis',
-        'Belum ada murid yang bergabung di lobby ini. Apakah Anda ingin tetap memulai kuis (untuk mode uji coba)?',
-        'Ya, Mulai',
-        'Batal'
-      );
-      if (!confirmRes.isConfirmed) {
-        setIsStartingGame(false);
+      if (currentQuestions.length === 0) {
+        showError('Soal Kosong', 'Gagal memuat soal kuis dari database. Silakan tunggu beberapa saat agar database siap, lalu klik Mulai Kuis lagi.');
         return;
       }
-    }
-    
-    try {
+
+      if (participants.length === 0 && !isMock) {
+        const confirmRes = await showConfirm(
+          'Mulai Kuis',
+          'Belum ada murid yang bergabung di lobby ini. Apakah Anda ingin tetap memulai kuis (untuk mode uji coba)?',
+          'Ya, Mulai',
+          'Batal'
+        );
+        if (!confirmRes.isConfirmed) {
+          return;
+        }
+      }
+      
       console.log('HostSession: calling startQuiz()...');
       await startQuiz();
     } catch (err: any) {
@@ -422,9 +632,20 @@ export const HostSession: React.FC = () => {
     });
   };
 
-  // Get Top Players Sorted
+  // Get Top Players Sorted (consistent tie-breaker with database)
   const getLeaderboard = () => {
-    return [...participants].sort((a, b) => b.score - a.score).slice(0, 5);
+    const liveLeaderboard = useLeaderboardStore.getState().leaderboard;
+    const source = (participants.length > 0 && participants.some(p => p.score > 0))
+      ? participants
+      : (liveLeaderboard.length > 0 ? liveLeaderboard : participants);
+
+    return [...source].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const timeA = a.joined_at ? new Date(a.joined_at).getTime() : 0;
+      const timeB = b.joined_at ? new Date(b.joined_at).getTime() : 0;
+      if (timeA !== timeB) return timeA - timeB;
+      return a.id.localeCompare(b.id);
+    }).slice(0, 5);
   };
 
   const renderLobby = () => (
@@ -572,7 +793,13 @@ export const HostSession: React.FC = () => {
 
           {/* Large Countdown Timer circle */}
           <div className="flex items-center gap-4">
-            <div className="h-16 w-16 rounded-full border-4 border-primary flex items-center justify-center text-xl font-black text-primary bg-primary/10">
+            <div 
+              id="host-question-timer"
+              data-testid="host-question-timer"
+              data-timer-value={timer}
+              data-expires-at={activeSession?.question_expires_at || ''}
+              data-server-offset={serverTimeOffset}
+              className="h-16 w-16 rounded-full border-4 border-primary flex items-center justify-center text-xl font-black text-primary bg-primary/10">
               {timer}
             </div>
           </div>
@@ -833,7 +1060,19 @@ export const HostSession: React.FC = () => {
   };
 
   const renderPodium = () => {
-    const sorted = [...participants].sort((a, b) => b.score - a.score);
+    const liveLeaderboard = useLeaderboardStore.getState().leaderboard;
+    const source = (participants.length > 0 && participants.some(p => p.score > 0))
+      ? participants
+      : (liveLeaderboard.length > 0 ? liveLeaderboard : participants);
+
+    const sorted = [...source].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const timeA = a.joined_at ? new Date(a.joined_at).getTime() : 0;
+      const timeB = b.joined_at ? new Date(b.joined_at).getTime() : 0;
+      if (timeA !== timeB) return timeA - timeB;
+      return a.id.localeCompare(b.id);
+    });
+
     const first = sorted[0];
     const second = sorted[1];
     const third = sorted[2];
@@ -927,6 +1166,57 @@ export const HostSession: React.FC = () => {
           )}
         </div>
 
+        {/* Tabel Hasil Akhir / Peringkat Lengkap */}
+        {sorted.length > 0 && (
+          <div className="glass-panel rounded-3xl shadow-md border overflow-hidden max-w-2xl mx-auto text-left">
+            <div className="px-6 py-4 bg-muted/20 border-b flex items-center justify-between">
+              <h3 className="text-sm font-black text-foreground uppercase tracking-wider flex items-center gap-2">
+                🏆 Tabel Hasil Akhir
+              </h3>
+              <span className="text-xs text-muted-foreground font-semibold">
+                Total {sorted.length} Peserta
+              </span>
+            </div>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-muted/40 border-b text-xs text-muted-foreground font-bold uppercase">
+                  <th className="px-6 py-3.5">Peringkat</th>
+                  <th className="px-6 py-3.5">Nama Murid</th>
+                  <th className="px-6 py-3.5 text-right">Skor Akhir</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border text-sm font-semibold">
+                {sorted.map((player, idx) => (
+                  <tr key={player.id} className="hover:bg-muted/5 transition">
+                    <td className="px-6 py-4 text-foreground">
+                      <div className="flex items-center gap-3">
+                        <span className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-black ${
+                          idx === 0 ? 'bg-yellow-400 text-yellow-950' : 
+                          idx === 1 ? 'bg-zinc-300 text-zinc-800' : 
+                          idx === 2 ? 'bg-amber-600 text-amber-50' : 'bg-muted text-muted-foreground'
+                        }`}>
+                          {idx + 1}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-foreground">
+                      <div className="flex items-center gap-2">
+                        <LazyImage
+                          src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(player.display_name)}`}
+                          alt="avatar"
+                          className="h-7 w-7 rounded-full"
+                        />
+                        <span>{player.display_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right text-primary font-bold">{player.score} pts</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <button
           onClick={() => navigate('/teacher/dashboard')}
           className="rounded-2xl bg-primary text-primary-foreground font-bold px-8 py-4 shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
@@ -956,9 +1246,11 @@ export const HostSession: React.FC = () => {
           transition={{ duration: 0.5 }}
           className="text-8xl font-black text-primary font-mono"
         >
-          {countdown}
+          {countdown > 0 ? countdown : '🏁'}
         </motion.div>
-        <p className="text-sm text-foreground font-semibold">Harap bersiap!</p>
+        <p className="text-sm text-foreground font-semibold">
+          {countdown > 0 ? 'Harap bersiap!' : 'Memulai soal...'}
+        </p>
       </motion.div>
     </div>
   );
@@ -966,6 +1258,7 @@ export const HostSession: React.FC = () => {
 
   return (
     <div className="min-h-screen p-6">
+      {renderConnectionToast()}
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between border-b pb-4 mb-6">
           <h1 className="text-lg font-black text-foreground">SINESA Live Host</h1>
@@ -990,47 +1283,94 @@ export const HostSession: React.FC = () => {
           </div>
         </div>
 
-        {initError ? (
+        {hostState === 'loading' ? (
+          <div className="text-center p-12 text-muted-foreground text-sm font-medium flex flex-col items-center justify-center gap-4 my-12">
+            <div className="h-8 w-8 animate-spin border-4 border-primary border-t-transparent rounded-full" />
+            <span>Memuat sesi kuis...</span>
+          </div>
+        ) : hostState === 'access_denied' ? (
           <div className="flex flex-col items-center justify-center p-8 max-w-lg mx-auto text-center animate-fade-in my-12">
-            <div className={`h-20 w-20 rounded-3xl flex items-center justify-center mb-6 shadow-xl ${
-              initError.type === 'access_denied' 
-                ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20 shadow-rose-500/5' 
-                : initError.type === 'not_found'
-                ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-amber-500/5'
-                : 'bg-destructive/10 text-destructive border border-destructive/20 shadow-destructive/5'
-            }`}>
-              {initError.type === 'access_denied' ? (
-                <ShieldAlert className="h-10 w-10 animate-bounce" />
-              ) : initError.type === 'not_found' ? (
-                <FileQuestion className="h-10 w-10 animate-pulse" />
-              ) : (
-                <AlertTriangle className="h-10 w-10 animate-pulse" />
-              )}
+            <div className="h-20 w-20 rounded-3xl flex items-center justify-center mb-6 shadow-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 shadow-rose-500/5">
+              <ShieldAlert className="h-10 w-10 animate-bounce" />
             </div>
             
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 tracking-wide uppercase bg-muted text-muted-foreground border border-border">
-              HTTP {initError.statusCode || (initError.type === 'access_denied' ? 403 : (initError.type === 'not_found' ? 404 : 500))}
+              HTTP 403
             </div>
 
             <h2 className="text-2xl font-black text-foreground mb-2">
-              {initError.title}
+              {errorInfo?.title || 'Akses Ditolak'}
             </h2>
             <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-md">
-              {initError.message}
+              {errorInfo?.message || 'Akses Ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.'}
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
               <button
                 type="button"
                 onClick={() => navigate('/teacher/dashboard')}
-                className="w-full py-3.5 px-5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition shadow-lg shadow-primary/20"
+                className="w-full py-3.5 px-5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition shadow-lg shadow-primary/20 cursor-pointer"
               >
                 Kembali ke Dashboard
               </button>
             </div>
           </div>
-        ) : activeSession === null || questions.length === 0 ? (
-          <div className="text-center p-12 text-muted-foreground text-sm font-medium flex flex-col items-center justify-center gap-4">
+        ) : hostState === 'not_found' ? (
+          <div className="flex flex-col items-center justify-center p-8 max-w-lg mx-auto text-center animate-fade-in my-12">
+            <div className="h-20 w-20 rounded-3xl flex items-center justify-center mb-6 shadow-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shadow-amber-500/5">
+              <FileQuestion className="h-10 w-10 animate-pulse" />
+            </div>
+            
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 tracking-wide uppercase bg-muted text-muted-foreground border border-border">
+              HTTP 404
+            </div>
+
+            <h2 className="text-2xl font-black text-foreground mb-2">
+              {errorInfo?.title || 'Sesi Tidak Ditemukan'}
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-md">
+              {errorInfo?.message || 'Sesi kuis tidak ditemukan.'}
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+              <button
+                type="button"
+                onClick={() => navigate('/teacher/dashboard')}
+                className="w-full py-3.5 px-5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition shadow-lg shadow-primary/20 cursor-pointer"
+              >
+                Kembali ke Dashboard
+              </button>
+            </div>
+          </div>
+        ) : hostState === 'error' ? (
+          <div className="flex flex-col items-center justify-center p-8 max-w-lg mx-auto text-center animate-fade-in my-12">
+            <div className="h-20 w-20 rounded-3xl flex items-center justify-center mb-6 shadow-xl bg-destructive/10 text-destructive border border-destructive/20 shadow-destructive/5">
+              <AlertTriangle className="h-10 w-10 animate-pulse" />
+            </div>
+            
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold mb-3 tracking-wide uppercase bg-muted text-muted-foreground border border-border">
+              HTTP {errorInfo?.statusCode || 500}
+            </div>
+
+            <h2 className="text-2xl font-black text-foreground mb-2">
+              {errorInfo?.title || 'Kesalahan Sistem'}
+            </h2>
+            <p className="text-sm text-muted-foreground leading-relaxed mb-8 max-w-md">
+              {errorInfo?.message || 'Terjadi kesalahan server atau gangguan jaringan.'}
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3 w-full max-w-xs">
+              <button
+                type="button"
+                onClick={() => navigate('/teacher/dashboard')}
+                className="w-full py-3.5 px-5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition shadow-lg shadow-primary/20 cursor-pointer"
+              >
+                Kembali ke Dashboard
+              </button>
+            </div>
+          </div>
+        ) : !activeSession ? (
+          <div className="text-center p-12 text-muted-foreground text-sm font-medium flex flex-col items-center justify-center gap-4 my-12">
             <div className="h-8 w-8 animate-spin border-4 border-primary border-t-transparent rounded-full" />
             <span>Memuat sesi kuis...</span>
           </div>
@@ -1038,7 +1378,7 @@ export const HostSession: React.FC = () => {
           renderLobby()
         ) : activeSession.current_stage === 'finished' ? (
           renderPodium()
-        ) : activeSession.current_stage === 'countdown' ? (
+        ) : isCountdownActive ? (
           renderCountdown()
         ) : activeSession.current_stage === 'leaderboard' ? (
           renderLeaderboard()
@@ -1105,7 +1445,7 @@ export const HostSession: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>Timer Sesi:</span>
-                <span className="text-white font-bold">{timer}s</span>
+                <span id="host-diagnostics-timer" className="text-white font-bold">{timer}s</span>
               </div>
               <div className="flex justify-between border-t border-zinc-900 pt-1.5 text-[10px]">
                 <span>State Update:</span>

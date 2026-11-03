@@ -1,9 +1,17 @@
-export type RealtimeStatus = 'CONNECTED' | 'CONNECTING' | 'RECONNECTING' | 'DISCONNECTED' | 'ERROR';
+export type RealtimeStatus =
+  | 'CONNECTED'
+  | 'CONNECTING'
+  | 'RECONNECTING'
+  | 'RECONNECTED'
+  | 'POLLING_FALLBACK'
+  | 'DISCONNECTED'
+  | 'ERROR';
 
 export type RealtimeEvent =
   | 'SessionUpdated'
   | 'ParticipantJoined'
   | 'ParticipantLeft'
+  | 'ParticipantsSynced'
   | 'AnswerSubmitted'
   | 'ParticipantUpdated'
   | 'MyParticipantUpdated'
@@ -11,5 +19,6 @@ export type RealtimeEvent =
   | 'QuestionChanged'
   | 'TimerUpdated'
   | 'TimerTick'
+  | 'CountdownTick'
   | 'LeaderboardUpdated'
   | 'QuizFinished';

@@ -6,9 +6,10 @@ import type { UserRole } from '@/types';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
+  allowGuest?: boolean;
 }
 
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
+export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles, allowGuest }) => {
   const { user, profile, loading } = useAuthStore();
 
   if (loading) {
@@ -22,8 +23,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
     );
   }
 
-  // Redirect to login if user is not authenticated
+  // Redirect to login if user is not authenticated, unless route explicitly allows guest
   if (!user || !profile) {
+    if (allowGuest) {
+      return <>{children}</>;
+    }
     return <Navigate to="/login" replace />;
   }
 

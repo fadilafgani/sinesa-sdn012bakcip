@@ -10,17 +10,23 @@ import { useFullscreen } from '@/shared/hooks/useFullscreen';
 import { useAntiCheat } from '@/shared/hooks/useAntiCheat';
 import { useNavigation } from '@/shared/hooks/useNavigation';
 import { useTimer } from '@/shared/hooks/useTimer';
+import { useCountdown } from '@/shared/hooks/useCountdown';
 import { useUiStore } from '@/shared/stores/ui-store';
 import { useSessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { 
   Award, Volume2, Check, X, ArrowLeft, Heart, SkipForward, Send, 
-  AlertCircle, Eye 
+  AlertCircle, Eye, Users, Clock, CheckCircle2, RefreshCw,
+  XCircle, HelpCircle, Target
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { showConfirm, showError } from '@/shared/utils/swal';
+import { sessionActions } from '@/features/session/stores/session-actions';
 import { QuestionService } from '@/features/question/services/question.service';
+import { SettingsService } from '@/features/settings/services/settings.service';
+import { ParticipantService } from '@/features/participant/services/participant.service';
+import { useParticipantStore } from '@/features/participant/stores/participant-store';
 import type { Option, Participant } from '@/types';
 import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import { LazyImage } from '@/shared/components/lazy-image';
@@ -31,6 +37,26 @@ export const PlaySession: React.FC = () => {
   const { profile, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, isMock: state.isMock })));
   const pin = searchParams.get('pin');
   const name = searchParams.get('name');
+
+  // Guest settings & inline join states (UAT-033)
+  const [allowGuestParticipants, setAllowGuestParticipants] = useState<boolean | null>(null);
+  const [inlinePin, setInlinePin] = useState(pin || '');
+  const [inlineName, setInlineName] = useState(name || '');
+  const [inlineJoining, setInlineJoining] = useState(false);
+  const [inlineError, setInlineError] = useState<string | null>(null);
+
+  useEffect(() => {
+    SettingsService.getSystemSettings().then(res => {
+      if (res.success && res.data) {
+        const guestSetting = res.data.find(s => s.key === 'allow_guest_participants');
+        setAllowGuestParticipants(!guestSetting || guestSetting.value !== 'false');
+      } else {
+        setAllowGuestParticipants(true);
+      }
+    }).catch(() => {
+      setAllowGuestParticipants(true);
+    });
+  }, []);
 
   const { navigate } = useNavigation();
   const {
@@ -52,12 +78,22 @@ export const PlaySession: React.FC = () => {
   } = useQuestion();
   const {
     participant,
+    participants,
     lives,
   } = useParticipants();
+
+  // ponytail: Ensure lobby participants are loaded immediately when entering waiting stage
+  useEffect(() => {
+    if (session?.id && session.current_stage === 'waiting') {
+      sessionActions.fetchParticipants(session.id);
+    }
+  }, [session?.id, session?.current_stage]);
+
   const {
     hasAnswered,
     isAnswerCorrect,
     scoreAwarded,
+    skippedQuestions,
     questionStatus,
     answersMap,
     isCompleted,
@@ -67,6 +103,17 @@ export const PlaySession: React.FC = () => {
     submitSelfPacedAnswer,
     submitFinalQuiz,
   } = useAnswer();
+
+  // ponytail: Synchronize participant stats and details when quiz completes or reaches finished screen
+  useEffect(() => {
+    if ((isCompleted || session?.current_stage === 'finished' || session?.status === 'completed') && participant?.id) {
+      ParticipantService.getParticipantById(participant.id).then(res => {
+        if (res.success && res.data) {
+          useParticipantStore.setState({ participant: res.data as Participant });
+        }
+      }).catch(err => console.error('Failed to sync participant stats:', err));
+    }
+  }, [isCompleted, session?.current_stage, session?.status, participant?.id]);
 
   const { loading, error: playError } = useUiStore();
 
@@ -87,19 +134,109 @@ export const PlaySession: React.FC = () => {
   const [shuffledMatches, setShuffledMatches] = useState<string[]>([]);
   const [isProgressing, setIsProgressing] = useState(false);
 
+  // Mode Santai & Lives configuration
+  const isCasualMode = (session?.quiz_mode === 'santai') || (quiz?.quiz_mode === 'santai');
+  const maxLives = session?.lives_count ?? quiz?.lives_count ?? 3;
+  const currentLives = typeof lives === 'number' ? Math.max(0, lives) : (typeof participant?.lives === 'number' ? Math.max(0, participant.lives) : maxLives);
+  const isOutOfLives = isCasualMode && maxLives > 0 && currentLives <= 0;
+
+  const renderLivesIndicator = () => {
+    if (!isCasualMode || maxLives <= 0) return null;
+
+    const isDepleted = currentLives <= 0;
+    const isCritical = currentLives === 1;
+
+    let containerStyle = 'bg-red-500/10 text-red-500 border-red-500/20';
+    if (isDepleted) {
+      containerStyle = 'bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/40 ring-1 ring-red-500/25';
+    } else if (isCritical) {
+      containerStyle = 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 animate-pulse';
+    }
+
+    return (
+      <div 
+        data-testid="lives-indicator"
+        data-lives={currentLives}
+        data-max-lives={maxLives}
+        data-status={isDepleted ? 'depleted' : 'active'}
+        className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold shadow-sm transition-all duration-300 ${containerStyle}`}
+      >
+        <span className="text-[10px] font-black tracking-wider uppercase mr-0.5">
+          Nyawa:
+        </span>
+
+        {maxLives <= 5 ? (
+          <div className="flex items-center gap-1" data-testid="lives-hearts-container">
+            {[...Array(maxLives)].map((_, i) => {
+              const isActive = i < currentLives;
+              return (
+                <Heart
+                  key={i}
+                  data-active={isActive ? 'true' : 'false'}
+                  className={`h-4.5 w-4.5 transition-all duration-300 ${
+                    isActive
+                      ? 'fill-red-500 text-red-500 drop-shadow-sm scale-100'
+                      : 'fill-zinc-300/40 text-zinc-400 dark:fill-zinc-800 dark:text-zinc-600 opacity-60 scale-95'
+                  }`}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1" data-testid="lives-counter-container">
+            <Heart 
+              className={`h-4.5 w-4.5 ${
+                currentLives > 0 
+                  ? 'fill-red-500 text-red-500 animate-pulse' 
+                  : 'fill-zinc-300/40 text-zinc-400 dark:fill-zinc-800 dark:text-zinc-600'
+              }`} 
+            />
+            <span className={`text-xs font-black ${currentLives > 0 ? 'text-red-500' : 'text-zinc-500'}`}>
+              {currentLives} / {maxLives}
+            </span>
+          </div>
+        )}
+
+        {isDepleted && (
+          <span 
+            data-testid="badge-nyawa-habis"
+            className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm animate-pulse"
+          >
+            Nyawa Habis
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const serverTimeOffset = session?.server_time ? Date.now() - session.server_time : 0;
+
+  // Shared countdown hook for student side (synchronized with Host)
+  const isCountdownStage = session?.current_stage === 'countdown';
+  const countdown = useCountdown({
+    expiresAt: session?.countdown_expires_at,
+    serverTimeOffset,
+    duration: session?.countdown_duration || 3,
+    enabled: isCountdownStage || (session?.current_stage === 'question' && !!session?.countdown_expires_at),
+  });
+  const isCountdownActive = isCountdownStage || (session?.current_stage === 'question' && countdown > 0 && !!session?.countdown_expires_at);
+
   // useTimer hook replacement
   const localTimer = useTimer({
     expiresAt: session?.question_expires_at || null,
-    enabled: session?.current_stage === 'question' && !!currentQuestion && !isCompleted && !showReviewScreen,
+    serverTimeOffset,
+    enabled: session?.current_stage === 'question' && !!currentQuestion && !isCompleted && !showReviewScreen && !isCountdownActive,
     onTimeUp: () => {
       if (!hasAnswered && currentQuestion) {
         const qType = currentQuestion.question_type || 'multiple_choice';
         if (qType === 'multiple_answer') {
-          submitAnswer({ optionIds: selectedOptionIdsRef.current });
+          const ids = selectedOptionIdsRef.current || [];
+          submitAnswer({ optionIds: ids, is_timeout: ids.length === 0 });
         } else if (qType === 'matching') {
-          submitAnswer({ matchingAnswers: matchingAnswersRef.current });
+          const matches = matchingAnswersRef.current || {};
+          submitAnswer({ matchingAnswers: matches, is_timeout: Object.keys(matches).length === 0 });
         } else {
-          submitAnswer('');
+          submitAnswer({ optionId: '', is_timeout: true });
         }
       }
     }
@@ -306,6 +443,13 @@ export const PlaySession: React.FC = () => {
     }
   }, [isCompleted, session?.status, session?.current_stage, quiz?.show_leaderboard, quiz?.show_final_result]);
 
+  // Ensure participant is marked completed when session finishes or completes
+  useEffect(() => {
+    if ((session?.status === 'completed' || session?.current_stage === 'finished') && participant && !participant.is_completed) {
+      submitFinalQuiz();
+    }
+  }, [session?.status, session?.current_stage, participant?.is_completed]);
+
   // Fetch all options for post-submission review
   const fetchAllOptions = async () => {
     if (questions.length === 0) return;
@@ -385,9 +529,10 @@ export const PlaySession: React.FC = () => {
 
 
 
-  // Play audio tones when answer feedback is rendered
+  // Play audio tones when answer feedback is rendered (never on timeout)
   useEffect(() => {
-    if (showFeedback && hasAnswered && isAnswerCorrect !== null) {
+    const isCurrentTimeout = currentQuestion ? (questionStatus[currentQuestion.id] === 'skipped' || skippedQuestions.includes(currentQuestion.id)) : false;
+    if (showFeedback && hasAnswered && isAnswerCorrect !== null && !isCurrentTimeout) {
       const showResult = quiz?.show_question_result !== false && quiz?.show_correct_answer !== false;
       if (showResult) {
         playSound(isAnswerCorrect ? 'correct' : 'incorrect');
@@ -396,7 +541,7 @@ export const PlaySession: React.FC = () => {
         }
       }
     }
-  }, [showFeedback, hasAnswered, quiz?.show_question_result, quiz?.show_correct_answer, isAnswerCorrect]);
+  }, [showFeedback, hasAnswered, quiz?.show_question_result, quiz?.show_correct_answer, isAnswerCorrect, currentQuestion, questionStatus, skippedQuestions]);
 
   const handleSelectOption = (optionId: string) => {
     if (hasAnswered || localTimer <= 0) return;
@@ -455,8 +600,142 @@ export const PlaySession: React.FC = () => {
       if (!confirmRes.isConfirmed) return;
     }
     leaveSession();
-    navigate('/student/dashboard');
+    navigate(profile ? '/student/dashboard' : '/login');
   };
+
+  // Rejection screen when guest access is disabled (UAT-033)
+  if (!profile && allowGuestParticipants === false) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-mesh p-4">
+        <div className="glass-panel p-8 rounded-3xl max-w-md w-full border border-destructive/25 space-y-4 text-center shadow-xl">
+          <div className="h-14 w-14 bg-destructive/10 border border-destructive/30 rounded-2xl flex items-center justify-center mx-auto text-destructive">
+            <AlertCircle className="h-7 w-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-xl font-bold text-foreground">Akses Tamu Dinonaktifkan</h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Partisipan tamu dinonaktifkan oleh Administrator. Silakan masuk menggunakan akun murid Anda untuk bergabung ke sesi kuis.
+            </p>
+          </div>
+          <button
+            id="btn-guest-denied-login"
+            onClick={() => navigate('/login?role=student')}
+            className="w-full py-3 bg-primary text-primary-foreground font-black rounded-xl text-xs hover:opacity-90 active:scale-95 transition-all shadow-md"
+          >
+            Masuk dengan Akun Murid
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Inline Join Form if user accessed /student/play-session without PIN/name (UAT-033)
+  if (!session && (!pin || !name) && !playError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-mesh p-4">
+        <div className="glass-panel p-8 rounded-3xl max-w-md w-full space-y-6 shadow-xl border border-primary/20">
+          <div className="text-center space-y-2">
+            <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary mx-auto mb-2">
+              <span className="text-2xl">🎮</span>
+            </div>
+            <h2 className="text-xl font-black text-foreground">Gabung Kuis SINESA</h2>
+            <p className="text-xs text-muted-foreground font-medium">
+              Masukkan PIN Kuis dari guru dan nama tampilan Anda untuk langsung bergabung ke room kuis.
+            </p>
+          </div>
+
+          {inlineError && (
+            <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive font-medium flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{inlineError}</span>
+            </div>
+          )}
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setInlineError(null);
+              const cleanPin = inlinePin.trim();
+              const cleanName = inlineName.trim();
+              if (!cleanPin) {
+                setInlineError('PIN Kuis wajib diisi.');
+                return;
+              }
+              if (cleanPin.length < 5) {
+                setInlineError('PIN Kuis minimal 5-6 angka/karakter.');
+                return;
+              }
+              if (!cleanName) {
+                setInlineError('Nama Tampilan wajib diisi.');
+                return;
+              }
+              if (cleanName.length < 2) {
+                setInlineError('Nama Tampilan minimal 2 karakter.');
+                return;
+              }
+              setInlineJoining(true);
+              const ok = await joinSession(cleanPin, cleanName, profile?.id);
+              setInlineJoining(false);
+              if (ok) {
+                navigate(`/student/play-session?pin=${encodeURIComponent(cleanPin)}&name=${encodeURIComponent(cleanName)}`, { replace: true });
+              } else {
+                setInlineError(playError || 'Gagal bergabung ke sesi kuis. Pastikan PIN benar dan kuis sudah dibuka oleh guru.');
+              }
+            }}
+            className="space-y-4"
+          >
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                PIN Kuis (6 Digit)
+              </label>
+              <input
+                id="inline-guest-pin"
+                type="text"
+                value={inlinePin}
+                onChange={(e) => setInlinePin(e.target.value.toUpperCase())}
+                placeholder="Contoh: 123456"
+                maxLength={10}
+                className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-mono tracking-widest outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 text-center font-bold"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                Nama Tampilan Anda
+              </label>
+              <input
+                id="inline-guest-name"
+                type="text"
+                value={inlineName}
+                onChange={(e) => setInlineName(e.target.value)}
+                placeholder="Contoh: Budi Santoso"
+                maxLength={50}
+                className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                required
+              />
+            </div>
+            <button
+              id="inline-guest-submit"
+              type="submit"
+              disabled={inlineJoining}
+              className="w-full rounded-2xl bg-primary text-primary-foreground py-3 text-sm font-bold shadow-lg shadow-primary/25 hover:bg-primary/95 transition active:scale-95 disabled:opacity-50"
+            >
+              {inlineJoining ? 'Menghubungkan...' : 'Gabung ke Room Kuis'}
+            </button>
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="text-xs text-muted-foreground hover:text-foreground font-semibold hover:underline"
+              >
+                Sudah punya akun? Masuk di sini
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   // Loading Screen
   if (loading) {
@@ -497,11 +776,11 @@ export const PlaySession: React.FC = () => {
           <button
             onClick={() => {
               leaveSession();
-              navigate('/student/dashboard');
+              navigate(profile ? '/student/dashboard' : '/login');
             }}
             className="w-full py-3 bg-foreground text-background font-black rounded-xl text-xs hover:opacity-90 active:scale-95 transition-all shadow-md"
           >
-            Kembali ke Dashboard
+            {profile ? 'Kembali ke Dashboard' : 'Kembali ke Halaman Masuk'}
           </button>
         </div>
       </div>
@@ -509,41 +788,70 @@ export const PlaySession: React.FC = () => {
   }
 
   const renderConnectionToast = () => {
-    if (realtimeStatus === 'RECONNECTING') {
+    if (realtimeStatus === 'RECONNECTING' || realtimeStatus === 'CONNECTING') {
       return (
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-bold shadow-xl animate-pulse backdrop-blur">
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-bold shadow-xl animate-pulse backdrop-blur">
           <span className="w-2 h-2 rounded-full bg-black animate-ping" />
-          Menghubungkan kembali ke server...
+          Menghubungkan ulang ke server...
+        </div>
+      );
+    }
+    if (realtimeStatus === 'RECONNECTED') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-emerald-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur animate-fade-in">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Terhubung kembali
+        </div>
+      );
+    }
+    if (realtimeStatus === 'POLLING_FALLBACK') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-sky-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+          Mode pemulihan polling aktif (data tersinkron)
+        </div>
+      );
+    }
+    if (realtimeStatus === 'DISCONNECTED') {
+      return (
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-red-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+          <AlertCircle className="w-3.5 h-3.5" />
+          Koneksi terputus
         </div>
       );
     }
     if (realtimeStatus === 'ERROR') {
       return (
-        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
+        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
           <AlertCircle className="w-3.5 h-3.5" />
           Koneksi terganggu. Menggunakan sinkronisasi cadangan...
         </div>
       );
     }
+    // CONNECTED -> Banner hidden!
     return null;
   };
 
   // 1. Lobby Waiting Screen
   console.log('[SYNC] PlaySession: Render with stage =', session?.current_stage, 'questionIdx =', session?.current_question_index);
   if (session?.current_stage === 'waiting') {
+    const roomParticipants = participants.filter(p => !p.session_id || p.session_id === session.id);
+
     return (
-      <div className="flex flex-col items-center justify-center min-h-[90vh] text-center p-4">
+      <div className="flex flex-col items-center justify-start min-h-[90vh] text-center p-4 py-8 max-w-3xl mx-auto space-y-6">
         {renderConnectionToast()}
+        
+        {/* Current Student Card */}
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="glass-panel p-8 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-amber-500/10"
+          className="glass-panel p-6 sm:p-8 rounded-3xl w-full max-w-md space-y-5 shadow-xl border-amber-500/10"
         >
           <div className="relative inline-block">
             <LazyImage
               src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(participant?.display_name || 'Murid')}`}
               alt="avatar"
-              className="h-20 w-20 rounded-full border bg-background mx-auto"
+              className="h-20 w-20 rounded-full border-2 border-primary/20 bg-background mx-auto"
             />
             <span className="absolute bottom-0 right-0 text-xl">🎮</span>
           </div>
@@ -576,27 +884,103 @@ export const PlaySession: React.FC = () => {
             Batal & Keluar Lobby
           </button>
         </motion.div>
+
+        {/* Full Lobby Participants List on Student Side */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="w-full max-w-2xl space-y-4"
+        >
+          <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary animate-pulse" />
+              <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                Peserta di Room ({roomParticipants.length})
+              </h3>
+            </div>
+            <span className="text-[11px] font-semibold text-muted-foreground bg-muted/60 px-2.5 py-1 rounded-full border border-border">
+              {roomParticipants.length === 1 ? '1 Peserta Aktif' : `${roomParticipants.length} Peserta Aktif`}
+            </span>
+          </div>
+
+          {loading && roomParticipants.length === 0 ? (
+            <div className="glass-panel p-8 rounded-2xl border text-center space-y-3">
+              <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-xs font-semibold text-muted-foreground">Memuat daftar peserta...</p>
+            </div>
+          ) : roomParticipants.length === 0 ? (
+            <div className="glass-panel p-8 rounded-2xl border border-dashed text-center">
+              <p className="text-xs text-muted-foreground italic">
+                Belum ada peserta lain. Kamu adalah yang pertama bergabung di room kuis ini!
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              <AnimatePresence>
+                {roomParticipants.map((p) => {
+                  const isMe = p.id === participant?.id;
+                  return (
+                    <motion.div
+                      key={p.id}
+                      initial={{ opacity: 0, scale: 0.85 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.85 }}
+                      transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+                      className={`glass-panel px-3.5 py-2.5 rounded-2xl border text-center font-bold text-xs flex items-center gap-2 justify-center transition-all ${
+                        isMe
+                          ? 'border-primary bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
+                          : 'text-foreground hover:bg-muted/30'
+                      }`}
+                    >
+                      <LazyImage
+                        src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
+                        alt="avatar"
+                        className="h-6 w-6 rounded-full flex-shrink-0"
+                      />
+                      <span className="truncate max-w-[100px]">{p.display_name}</span>
+                      {isMe && (
+                        <span className="text-[9px] uppercase px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground font-black flex-shrink-0">
+                          Kamu
+                        </span>
+                      )}
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
+            </div>
+          )}
+        </motion.div>
       </div>
     );
   }
 
-  // 1.5. Countdown Screen
-  if (session?.current_stage === 'countdown') {
+  // 1.5. Countdown Screen (Synchronized 3-2-1 shared with Host)
+  if (isCountdownActive) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-mesh p-4">
         {renderConnectionToast()}
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          className="glass-panel p-12 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-primary/20 flex flex-col items-center justify-center text-center animate-pulse"
+          className="glass-panel p-12 rounded-3xl w-full max-w-md space-y-6 shadow-xl border-primary/20 flex flex-col items-center justify-center text-center"
         >
-          <span className="text-xs uppercase font-bold text-muted-foreground tracking-widest block mb-2">
-            Bersiaplah!
+          <span className="text-xs uppercase font-bold text-muted-foreground tracking-widest block mb-2 animate-pulse">
+            Persiapan Soal {(session?.current_question_index ?? 0) + 1}
           </span>
-          <span className="text-6xl font-black text-primary block animate-bounce">
-            🏁
-          </span>
-          <p className="text-sm text-foreground font-semibold">Soal {session.current_question_index + 1} segera dimulai...</p>
+          <motion.div
+            key={countdown}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 1.5, opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="text-8xl font-black text-primary font-mono"
+          >
+            {countdown > 0 ? countdown : '🏁'}
+          </motion.div>
+          <p className="text-sm text-foreground font-semibold">
+            {countdown > 0 ? 'Harap bersiap!' : 'Memulai soal...'}
+          </p>
         </motion.div>
       </div>
     );
@@ -664,24 +1048,25 @@ export const PlaySession: React.FC = () => {
           <div className="space-y-6">
             {questions.map((q, idx) => {
               const ans = answersMap[q.id];
-              const status = questionStatus[q.id] || 'unanswered';
-              const isCorrect = ans?.is_correct || false;
+              const status = questionStatus[q.id] || (skippedQuestions.includes(q.id) ? 'skipped' : (ans ? 'answered' : 'unanswered'));
+              const isTimeout = status === 'skipped' || skippedQuestions.includes(q.id) || !!(ans as any)?.is_timeout;
+              const isCorrect = !isTimeout && (ans?.is_correct || false);
               const opts = allQuestionsOptions[q.id] || [];
 
-              // Status badge
+              // Status badge (Tidak Dijawab if skipped/timeout or unanswered)
               let badge = (
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-zinc-800 text-zinc-400 border border-zinc-700">
-                  Belum Dijawab
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                  Tidak Dijawab
                 </span>
               );
 
-              if (status === 'skipped') {
+              if (isTimeout || status === 'skipped') {
                 badge = (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-yellow-500/10 text-yellow-500 border border-yellow-500/20">
-                    Dilewati
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                    Tidak Dijawab
                   </span>
                 );
-              } else if (status === 'answered') {
+              } else if (status === 'answered' && ans && !(ans as any).is_timeout) {
                 if (showCorrectAnswer) {
                   badge = isCorrect ? (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-green-500/10 text-green-500 border border-green-500/20">
@@ -809,10 +1194,19 @@ export const PlaySession: React.FC = () => {
   // 2. Play session ended (Results/Podium screen)
   if (isCompleted || session?.current_stage === 'finished' || session?.status === 'completed') {
     console.log('[SYNC] PlaySession: Rendering completed/finished screen');
-    const isGameOver = lives === 0 && session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0;
+    const isGameOver = isOutOfLives;
     const showFinalResultSetting = quiz?.show_final_result !== false;
     const showLeaderboardSetting = quiz?.show_leaderboard !== false;
     const showAnswerReviewSetting = quiz?.show_answer_review !== false;
+
+    const totalQuestions = participant?.stats?.total_questions ?? questions.length;
+    const localCorrect = Object.values(answersMap).filter(a => a.is_correct).length;
+    const correctCount = participant?.stats?.correct_count ?? (participant?.total_correct ?? localCorrect);
+    const localIncorrect = Object.values(answersMap).filter(a => !a.is_correct).length;
+    const incorrectCount = participant?.stats?.incorrect_count ?? (participant?.total_incorrect ?? localIncorrect);
+    const calculatedUnanswered = Math.max(0, totalQuestions - (correctCount + incorrectCount));
+    const unansweredCount = participant?.stats?.unanswered_count ?? (participant?.total_unanswered ?? calculatedUnanswered);
+    const accuracyPercent = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 1000) / 10 : 0;
 
     return (
       <div className="flex flex-col items-center justify-center min-h-[90vh] text-center p-4 max-w-md mx-auto space-y-6">
@@ -842,31 +1236,92 @@ export const PlaySession: React.FC = () => {
             </div>
           )}
 
-          <div className="border-y border-border py-5 space-y-3.5 text-left w-full">
+          <div className="border-y border-border py-5 space-y-4 text-left w-full" data-testid="quiz-result-summary">
             {showFinalResultSetting ? (
               <>
-                <div className="flex justify-between items-center text-sm font-semibold">
-                  <span className="text-muted-foreground">Total Skor Anda:</span>
-                  <span className="text-primary font-black text-lg">{participant?.score || 0} Pts</span>
-                </div>
-                {session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0 && (
-                  <div className="flex justify-between items-center text-sm font-semibold">
-                    <span className="text-muted-foreground">Sisa Nyawa:</span>
-                    <span className="flex items-center gap-1">
-                      {quiz.lives_count <= 5 ? (
-                        [...Array(quiz.lives_count)].map((_, i) => (
-                          <Heart 
-                            key={i} 
-                            className={`h-4.5 w-4.5 ${i < lives ? 'fill-red-500 text-red-500' : 'text-zinc-600'}`} 
-                          />
-                        ))
-                      ) : (
-                        <div className="flex items-center gap-1">
-                          <Heart className="h-4.5 w-4.5 fill-red-500 text-red-500" />
-                          <span className="text-xs font-black">{lives} / {quiz.lives_count}</span>
-                        </div>
-                      )}
+                {/* Hero Stats: Final Score & Accuracy */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div 
+                    data-testid="stat-final-score" 
+                    className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-primary/10 border border-primary/20 text-center"
+                  >
+                    <span className="text-[10px] uppercase tracking-wider font-extrabold text-primary mb-0.5">
+                      Skor Akhir
                     </span>
+                    <span className="text-2xl font-black text-foreground">
+                      {participant?.score || 0}
+                    </span>
+                  </div>
+
+                  <div 
+                    data-testid="stat-accuracy" 
+                    className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center"
+                  >
+                    <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-600 dark:text-emerald-400 mb-0.5">
+                      Akurasi
+                    </span>
+                    <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
+                      {accuracyPercent}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3-Column Breakdown: Benar, Salah, Tidak Dijawab */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div 
+                    data-testid="stat-correct-count" 
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-center"
+                  >
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Benar</span>
+                    </div>
+                    <span className="text-lg font-black text-foreground">
+                      {correctCount}
+                    </span>
+                  </div>
+
+                  <div 
+                    data-testid="stat-incorrect-count" 
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-rose-500/5 border border-rose-500/15 text-center"
+                  >
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400 mb-0.5">
+                      <XCircle className="h-3.5 w-3.5" />
+                      <span>Salah</span>
+                    </div>
+                    <span className="text-lg font-black text-foreground">
+                      {incorrectCount}
+                    </span>
+                  </div>
+
+                  <div 
+                    data-testid="stat-unanswered-count" 
+                    className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-zinc-500/5 border border-zinc-500/15 text-center"
+                  >
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-600 dark:text-zinc-400 mb-0.5">
+                      <HelpCircle className="h-3.5 w-3.5" />
+                      <span>Tidak Dijawab</span>
+                    </div>
+                    <span className="text-lg font-black text-foreground">
+                      {unansweredCount}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Secondary details: Total Soal & Lives indicator */}
+                <div className="flex justify-between items-center text-xs font-semibold pt-1 border-t border-border/50">
+                  <span className="text-muted-foreground">Total Soal Dinilai:</span>
+                  <span className="text-foreground font-bold" data-testid="stat-total-questions">
+                    {totalQuestions} Soal
+                  </span>
+                </div>
+
+                {isCasualMode && maxLives > 0 && (
+                  <div className="flex justify-between items-center text-xs font-semibold">
+                    <span className="text-muted-foreground">Sisa Nyawa:</span>
+                    <div>
+                      {renderLivesIndicator()}
+                    </div>
                   </div>
                 )}
               </>
@@ -877,12 +1332,6 @@ export const PlaySession: React.FC = () => {
                 </p>
               </div>
             )}
-            <div className="flex justify-between items-center text-sm font-semibold">
-              <span className="text-muted-foreground">Soal Terjawab:</span>
-              <span className="text-foreground font-bold">
-                {Object.values(questionStatus).filter(s => s === 'answered').length} / {questions.length}
-              </span>
-            </div>
           </div>
 
           {/* Review Button */}
@@ -1118,22 +1567,20 @@ export const PlaySession: React.FC = () => {
     <div className="min-h-screen flex flex-col justify-between p-4">
       {renderConnectionToast()}
       {/* Top bar info */}
-      <div className="flex items-center justify-between border-b pb-3 mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3 mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleExit}
-            className="flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-foreground mr-1"
+            className="flex items-center gap-1 text-xs font-bold text-muted-foreground hover:text-foreground mr-1 transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
             Keluar
           </button>
-          {isSelfPaced && (
-            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
-              session?.quiz_mode === 'santai' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
-            }`}>
-              {session?.quiz_mode === 'santai' ? '🕹️ Casual' : '🎓 Serius'}
-            </span>
-          )}
+          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
+            isCasualMode ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
+          }`}>
+            {isCasualMode ? '🕹️ Casual' : '🎓 Serius'}
+          </span>
           {quiz?.anti_cheat_enabled && (
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-red-500/15 text-red-500 border border-red-500/25 animate-pulse shadow-sm">
               🛡️ Anti-Cheat | Pelanggaran: {participant?.violation_count || 0}/{session?.auto_submit_on_violation ?? 3}
@@ -1141,25 +1588,8 @@ export const PlaySession: React.FC = () => {
           )}
         </div>
 
-        <div className="text-center flex items-center gap-2">
-          {isSelfPaced && session?.quiz_mode === 'santai' && quiz && quiz.lives_count > 0 && (
-            <div className="flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 px-3 py-1 rounded-full mr-2">
-              <span className="text-xs font-black tracking-wider uppercase mr-1">Nyawa:</span>
-              {quiz.lives_count <= 5 ? (
-                [...Array(quiz.lives_count)].map((_, i) => (
-                  <Heart 
-                    key={i} 
-                    className={`h-4.5 w-4.5 ${i < lives ? 'fill-red-500 text-red-500' : 'text-zinc-600'}`} 
-                  />
-                ))
-              ) : (
-                <div className="flex items-center gap-1">
-                  <Heart className="h-4.5 w-4.5 fill-red-500 text-red-500 animate-pulse" />
-                  <span className="text-xs font-black">{lives} / {quiz.lives_count}</span>
-                </div>
-              )}
-            </div>
-          )}
+        <div className="flex items-center gap-2.5 flex-wrap justify-center">
+          {renderLivesIndicator()}
           <span className="text-sm font-extrabold text-primary">
             {participant?.display_name}
             {quiz?.show_score_per_question !== false && ` - ${participant?.score} Pts`}
@@ -1167,7 +1597,13 @@ export const PlaySession: React.FC = () => {
         </div>
 
         {/* Timer status */}
-        <div className="h-10 w-10 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center font-black text-primary text-sm shadow">
+        <div 
+          id="student-question-timer"
+          data-testid="student-question-timer"
+          data-timer-value={localTimer}
+          data-expires-at={session?.question_expires_at || ''}
+          data-server-offset={serverTimeOffset}
+          className="h-10 w-10 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center font-black text-primary text-sm shadow shrink-0">
           {localTimer}s
         </div>
       </div>
@@ -1179,6 +1615,40 @@ export const PlaySession: React.FC = () => {
           style={{ width: `${Math.min(100, Math.max(0, (localTimer / ((currentQuestion?.duration || (currentQuestion as any)?.timer || quiz?.duration_per_question || 30))) * 100))}%` }}
         />
       </div>
+
+      {/* Visual Notice Banner when Nyawa Habis */}
+      {isOutOfLives && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          data-testid="nyawa-habis-banner"
+          className="w-full max-w-2xl mx-auto mb-6 p-4 rounded-2xl bg-red-500/15 border-2 border-red-500/30 text-red-700 dark:text-red-300 flex items-center justify-between gap-3 shadow-md"
+        >
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-red-600 text-white flex items-center justify-center shrink-0 font-black shadow-md text-lg">
+              💔
+            </div>
+            <div className="text-left">
+              <div className="flex items-center gap-2">
+                <h4 className="font-black text-sm uppercase tracking-wide text-red-600 dark:text-red-400">
+                  Nyawa Habis
+                </h4>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-600 text-white uppercase tracking-wider">
+                  Game Over
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground font-semibold mt-0.5">
+                Anda telah kehabisan nyawa. Kesempatan menjawab soal pada sesi ini telah berakhir.
+              </p>
+            </div>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 shrink-0">
+            {[...Array(Math.min(maxLives, 5))].map((_, i) => (
+              <Heart key={i} className="h-4.5 w-4.5 fill-zinc-300/40 text-zinc-400 dark:fill-zinc-800 dark:text-zinc-600 opacity-60" />
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* SELF-PACED QUESTIONS NAVIGATION PANEL */}
       {isSelfPaced && (
@@ -1301,52 +1771,66 @@ export const PlaySession: React.FC = () => {
 
       {/* Interactive feedback overlaid popup */}
       <AnimatePresence>
-        {showFeedback && (
-          <motion.div
-            initial={{ opacity: 0, y: 15 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -15 }}
-            className={`fixed inset-x-4 bottom-4 md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md glass-panel p-6 rounded-3xl shadow-2xl border-2 flex flex-col gap-4 z-50 ${
-              quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
-                ? (isAnswerCorrect ? 'border-green-500 bg-green-50/15 backdrop-blur-md' : 'border-red-500 bg-red-50/15 backdrop-blur-md')
-                : 'border-primary bg-primary/10 backdrop-blur-md'
-            }`}
-          >
-            {/* Top Row */}
-            <div className="flex items-center gap-4">
-              <div className={`h-12 w-12 rounded-full flex items-center justify-center shrink-0 text-white font-black shadow-lg ${
+        {showFeedback && (() => {
+          const currentQId = currentQuestion?.id;
+          const currentStatus = currentQId ? questionStatus[currentQId] : undefined;
+          const isTimeoutQuestion = currentStatus === 'skipped' || (currentQId ? skippedQuestions.includes(currentQId) : false);
+
+          return (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className={`fixed inset-x-4 bottom-4 md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md glass-panel p-6 rounded-3xl shadow-2xl border-2 flex flex-col gap-4 z-50 ${
                 quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
-                  ? (isAnswerCorrect ? 'bg-green-600' : 'bg-red-600')
-                  : 'bg-primary'
-              }`}>
-                {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
-                  ? (isAnswerCorrect ? <Check className="h-6 w-6" /> : <X className="h-6 w-6" />)
-                  : <Check className="h-6 w-6" />
-                }
-              </div>
-              <div className="flex-1">
-                <h4 className="font-extrabold text-base text-foreground">
+                  ? (isTimeoutQuestion
+                      ? 'border-amber-500 bg-amber-500/10 backdrop-blur-md'
+                      : isAnswerCorrect
+                      ? 'border-green-500 bg-green-50/15 backdrop-blur-md'
+                      : 'border-red-500 bg-red-50/15 backdrop-blur-md')
+                  : 'border-primary bg-primary/10 backdrop-blur-md'
+              }`}
+            >
+              {/* Top Row */}
+              <div className="flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-full flex items-center justify-center shrink-0 text-white font-black shadow-lg ${
+                  quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
+                    ? (isTimeoutQuestion ? 'bg-amber-500' : isAnswerCorrect ? 'bg-green-600' : 'bg-red-600')
+                    : 'bg-primary'
+                }`}>
                   {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
-                    ? (isAnswerCorrect ? 'Jawaban Benar!' : 'Jawaban Salah!')
-                    : 'Jawaban Tersimpan'
+                    ? (isTimeoutQuestion ? <Clock className="h-6 w-6" /> : isAnswerCorrect ? <Check className="h-6 w-6" /> : <X className="h-6 w-6" />)
+                    : <Check className="h-6 w-6" />
                   }
-                </h4>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
-                    ? (isAnswerCorrect 
-                      ? (quiz?.show_score_per_question !== false ? `Anda mendapatkan +${scoreAwarded} Poin!` : 'Jawaban Anda tepat!') 
-                      : 'Tetap semangat, coba lagi di soal berikutnya!')
-                    : (quiz?.show_score_per_question !== false && isAnswerCorrect && scoreAwarded > 0
-                      ? `Anda mendapatkan +${scoreAwarded} Poin!`
-                      : 'Jawaban Anda telah berhasil disimpan.')
-                  }
-                </p>
-                {isSelfPaced && (quiz?.show_question_result !== false && quiz?.show_correct_answer !== false) && !isAnswerCorrect && session.quiz_mode === 'santai' && (
-                  <p className="text-[10px] text-red-500 font-extrabold mt-1">
-                    💔 Kehilangan 1 Nyawa! Sisa Nyawa: {lives}
+                </div>
+                <div className="flex-1">
+                  <h4 className="font-extrabold text-base text-foreground">
+                    {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
+                      ? (isTimeoutQuestion ? 'Waktu Habis (Tidak Dijawab)' : isAnswerCorrect ? 'Jawaban Benar!' : 'Jawaban Salah!')
+                      : (isTimeoutQuestion ? 'Waktu Habis (Tidak Dijawab)' : 'Jawaban Tersimpan')
+                    }
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
+                      ? (isTimeoutQuestion
+                          ? 'Waktu pengerjaan telah habis sebelum Anda mengirim jawaban.'
+                          : isAnswerCorrect 
+                          ? (quiz?.show_score_per_question !== false ? `Anda mendapatkan +${scoreAwarded} Poin!` : 'Jawaban Anda tepat!') 
+                          : 'Tetap semangat, coba lagi di soal berikutnya!')
+                      : (quiz?.show_score_per_question !== false && isAnswerCorrect && scoreAwarded > 0
+                        ? `Anda mendapatkan +${scoreAwarded} Poin!`
+                        : (isTimeoutQuestion ? 'Waktu pengerjaan telah habis.' : 'Jawaban Anda telah berhasil disimpan.'))
+                    }
                   </p>
-                )}
-              </div>
+                  {isCasualMode && !isTimeoutQuestion && (quiz?.show_question_result !== false && quiz?.show_correct_answer !== false) && !isAnswerCorrect && (
+                    <p className="text-[10px] text-red-500 font-extrabold mt-1">
+                      {isOutOfLives 
+                        ? '💔 Nyawa Anda telah habis! Anda tidak dapat menjawab soal lagi.'
+                        : `💔 Kehilangan 1 Nyawa! Sisa Nyawa: ${currentLives}`
+                      }
+                    </p>
+                  )}
+                </div>
               {isSelfPaced && (
                 <button
                   type="button"
@@ -1461,7 +1945,8 @@ export const PlaySession: React.FC = () => {
               </div>
             )}
           </motion.div>
-        )}
+        );
+      })()}
       </AnimatePresence>
 
       {/* Answer selection pad layout */}
@@ -1470,7 +1955,7 @@ export const PlaySession: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {currentOptions.map((opt) => {
               const isSelected = selectedOptionIds.includes(opt.id);
-              const isDisabled = hasAnswered || localTimer <= 0;
+              const isDisabled = hasAnswered || localTimer <= 0 || isOutOfLives;
               const shouldHighlight = hasAnswered || localTimer <= 0;
               const isTrue = opt.option_text.toLowerCase() === 'benar' || opt.option_text.toLowerCase() === 'true';
 
@@ -1522,7 +2007,7 @@ export const PlaySession: React.FC = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {currentOptions.map((opt, idx) => {
                 const isSelected = selectedOptionIds.includes(opt.id);
-                const isDisabled = hasAnswered || localTimer <= 0;
+                const isDisabled = hasAnswered || localTimer <= 0 || isOutOfLives;
                 const shouldHighlight = hasAnswered || localTimer <= 0;
 
                 let buttonColor = colors[idx % 4];
@@ -1574,7 +2059,7 @@ export const PlaySession: React.FC = () => {
               })}
             </div>
 
-            {!isSelfPaced && !hasAnswered && localTimer > 0 && (
+            {!isSelfPaced && !hasAnswered && localTimer > 0 && !isOutOfLives && (
               <button
                 type="button"
                 onClick={() => submitAnswer({ optionIds: selectedOptionIds })}
@@ -1589,7 +2074,7 @@ export const PlaySession: React.FC = () => {
           <div className="space-y-6 max-w-2xl mx-auto">
             <div className="space-y-3 bg-card/45 p-6 rounded-3xl border border-border">
               {currentOptions.map((opt, idx) => {
-                const isDisabled = hasAnswered || localTimer <= 0;
+                const isDisabled = hasAnswered || localTimer <= 0 || isOutOfLives;
                 const shouldHighlight = hasAnswered || localTimer <= 0;
                 const matchedValue = matchingAnswers[opt.id] || '';
                 const isMatchedCorrect = matchedValue === opt.match_text;
@@ -1656,7 +2141,7 @@ export const PlaySession: React.FC = () => {
               })}
             </div>
 
-            {!isSelfPaced && !hasAnswered && localTimer > 0 && (
+            {!isSelfPaced && !hasAnswered && localTimer > 0 && !isOutOfLives && (
               <button
                 type="button"
                 onClick={() => submitAnswer({ matchingAnswers })}
@@ -1672,7 +2157,7 @@ export const PlaySession: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {currentOptions.map((opt, idx) => {
               const isSelected = selectedOptionIds.includes(opt.id);
-              const isDisabled = hasAnswered || localTimer <= 0;
+              const isDisabled = hasAnswered || localTimer <= 0 || isOutOfLives;
               const shouldHighlight = hasAnswered || localTimer <= 0;
 
               let buttonColor = colors[idx % 4];
@@ -1741,9 +2226,11 @@ export const PlaySession: React.FC = () => {
               type="button"
               onClick={handleSelfPacedSubmit}
               disabled={
-                currentQuestion.question_type === 'matching' 
-                  ? currentOptions.some(o => !matchingAnswers[o.id]) 
-                  : selectedOptionIds.length === 0
+                isOutOfLives || (
+                  currentQuestion.question_type === 'matching' 
+                    ? currentOptions.some(o => !matchingAnswers[o.id]) 
+                    : selectedOptionIds.length === 0
+                )
               }
               className="flex items-center justify-center gap-2 py-4 bg-green-600 hover:bg-green-700 text-white font-black text-sm rounded-2xl shadow-md active:scale-[0.98] transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -1997,7 +2484,7 @@ export const PlaySession: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>Local Timer:</span>
-                <span className="text-white font-bold">{localTimer}s</span>
+                <span id="student-diagnostics-timer" className="text-white font-bold">{localTimer}s</span>
               </div>
               <div className="flex justify-between border-t border-zinc-900 pt-1.5 text-[10px]">
                 <span>State Update:</span>

@@ -81,6 +81,10 @@ export interface QuizSession {
   status: 'lobby' | 'active' | 'completed';
   current_stage: 'waiting' | 'countdown' | 'question' | 'question_result' | 'leaderboard' | 'finished';
   current_question_index: number;
+  countdown_started_at?: string | null;
+  countdown_expires_at?: string | null;
+  countdown_duration?: number;
+  server_time?: number;
   question_started_at: string | null;
   question_expires_at: string | null;
   quiz_mode: QuizMode;
@@ -101,6 +105,14 @@ export interface QuizSession {
   quiz?: Quiz;
 }
 
+export interface ParticipantStats {
+  total_questions: number;
+  correct_count: number;
+  incorrect_count: number;
+  unanswered_count: number;
+  accuracy: number;
+}
+
 export interface Participant {
   id: string;
   session_id: string;
@@ -114,6 +126,12 @@ export interface Participant {
   violation_count: number;
   is_completed?: boolean;
   joined_at: string;
+  rank?: number;
+  stats?: ParticipantStats;
+  total_correct?: number;
+  total_incorrect?: number;
+  total_unanswered?: number;
+  accuracy?: number;
 }
 
 export interface Answer {

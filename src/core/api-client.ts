@@ -209,8 +209,15 @@ class ApiClient {
     }
 
     try {
+      // ponytail: 15s timeout prevents hanging requests during temporary concurrency spikes
+      const timeoutSignal = (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal)
+        ? AbortSignal.timeout(15000)
+        : undefined;
+      const effectiveSignal = customInit?.signal || timeoutSignal;
+
       const res = await fetch(url, {
         ...customInit,
+        signal: effectiveSignal,
         method,
         headers,
         body: requestBody,

@@ -78,5 +78,12 @@ export const SessionService = {
     return safeCall<{ id: string }[]>(
       apiClient.get<{ id: string }[]>('/sessions', { params: { quiz_id: quizId, fields: 'id' } })
     );
+  },
+
+  async getSessionsByQuizId(quizId: string): Promise<ServiceResponse<QuizSession[]>> {
+    console.log('[SYNC] SessionService.getSessionsByQuizId', { quizId });
+    return safeCall<QuizSession[]>(
+      apiClient.get<QuizSession[]>('/sessions', { params: { quiz_id: quizId } })
+    );
   }
 };
