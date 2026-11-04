@@ -11,6 +11,13 @@ export const SessionService = {
     );
   },
 
+  async getSessionWithParticipants(id: string): Promise<ServiceResponse<QuizSession>> {
+    console.log('[SYNC] SessionService.getSessionWithParticipants', { id });
+    return safeCall<QuizSession>(
+      apiClient.get<QuizSession>('/sessions', { params: { id, with_participants: 1 } })
+    );
+  },
+
   async getAllSessions(): Promise<ServiceResponse<QuizSession[]>> {
     console.log('[SYNC] SessionService.getAllSessions');
     return safeCall<QuizSession[]>(

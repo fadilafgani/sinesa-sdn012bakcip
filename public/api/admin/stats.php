@@ -105,7 +105,8 @@ try {
             s.quiz_mode, s.created_at, s.completed_at,
             q.title AS quiz_title,
             p.full_name AS host_name,
-            (SELECT COUNT(*) FROM participants WHERE session_id = s.id) AS participant_count
+            (SELECT COUNT(*) FROM participants WHERE session_id = s.id) AS participant_count,
+            (SELECT COALESCE(SUM(violation_count), 0) FROM participants WHERE session_id = s.id) AS total_violations
         FROM quiz_sessions s
         LEFT JOIN quizzes q ON s.quiz_id = q.id
         LEFT JOIN profiles p ON s.host_id = p.id
@@ -164,6 +165,7 @@ try {
                 'status'            => (string)$s['status'],
                 'current_stage'     => (string)$s['current_stage'],
                 'participant_count' => (int)($s['participant_count'] ?? 0),
+                'total_violations'  => (int)($s['total_violations'] ?? 0),
                 'created_at'        => (string)$s['created_at'],
                 'completed_at'      => $s['completed_at'] !== null ? (string)$s['completed_at'] : null,
             ];

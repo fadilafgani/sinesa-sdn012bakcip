@@ -22,7 +22,7 @@ export const useAntiCheat = ({ enabled, onViolationTriggered }: UseAntiCheatOpti
     if (now - lastTrigger < 1500) return;
     (window as any)._lastViolationTime = now;
 
-    incrementViolation().then(() => {
+    incrementViolation(reason).then(() => {
       setWarningReason(reason);
       setShowWarningModal(true);
       triggerCallbackRef.current?.(reason);

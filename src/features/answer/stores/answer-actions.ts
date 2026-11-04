@@ -458,7 +458,7 @@ export const answerActions = {
     }
   },
 
-  incrementViolation: async () => {
+  incrementViolation: async (reason?: string) => {
     await refreshAuth();
 
     const session = useSessionStore.getState().session;
@@ -478,7 +478,10 @@ export const answerActions = {
       localStorage.setItem(partsKey, JSON.stringify(updatedParts));
     } else {
       try {
-        await ParticipantService.updateParticipant(participant.id, { violation_count: newViolationCount });
+        await ParticipantService.updateParticipant(participant.id, { 
+          violation_count: newViolationCount,
+          ...((reason ? { violation_reason: reason } : {}) as any)
+        });
       } catch (e) {
         console.error('Failed to update violation count:', e);
       }

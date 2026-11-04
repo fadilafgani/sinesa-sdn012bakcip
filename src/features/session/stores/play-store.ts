@@ -49,7 +49,7 @@ export interface PlayState {
   fetchLeaderboard: () => Promise<Participant[]>;
   fetchParticipants: (sessionId: string) => Promise<void>;
   fetchQuestionStats: (questionId: string) => Promise<{ correctCount: number; incorrectCount: number; totalCount: number } | null>;
-  incrementViolation: () => Promise<void>;
+  incrementViolation: (reason?: string) => Promise<void>;
 }
 
 // Global actions definition that are static and do not trigger re-renders

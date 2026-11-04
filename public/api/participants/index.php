@@ -549,8 +549,28 @@ try {
         }
 
         if (isset($input['violation_count'])) {
+            $newViolationCount = (int)$input['violation_count'];
+            $oldViolationCount = (int)($existing['violation_count'] ?? 0);
             $fields[] = "`violation_count` = :violation_count";
-            $params[':violation_count'] = (int)$input['violation_count'];
+            $params[':violation_count'] = $newViolationCount;
+
+            // Log confirmed violation to activity_logs for Admin audit & live telemetry
+            if ($newViolationCount > $oldViolationCount) {
+                try {
+                    $reason = sanitize_string($input['violation_reason'] ?? $input['reason'] ?? 'Pelanggaran anti-cheat / keluar layar kuis');
+                    $logStmt = $pdo->prepare("
+                        INSERT INTO activity_logs (id, user_id, action, details, created_at)
+                        VALUES (:lid, :luid, 'CHEAT_VIOLATION', :ldet, NOW())
+                    ");
+                    $logStmt->execute([
+                        ':lid'  => generate_uuid(),
+                        ':luid' => $existing['student_id'] !== null ? (string)$existing['student_id'] : null,
+                        ':ldet' => "Peserta '{$existing['display_name']}' terkonfirmasi melakukan pelanggaran anti-cheat: {$reason} (Sesi: {$existing['session_id']}, Ke-{$newViolationCount})."
+                    ]);
+                } catch (\Throwable $e) {
+                    error_log('Failed to log CHEAT_VIOLATION: ' . $e->getMessage());
+                }
+            }
         }
 
         if (isset($input['is_completed'])) {

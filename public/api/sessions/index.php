@@ -61,6 +61,9 @@ function format_session_row(array $row): array {
         'auto_submit_on_violation' => (int)($row['auto_submit_on_violation'] ?? 3),
         'created_at'               => (string)$row['created_at'],
         'completed_at'             => $row['completed_at'] !== null ? (string)$row['completed_at'] : null,
+        'participant_count'        => (int)($row['participant_count'] ?? 0),
+        'active_participant_count' => (int)($row['active_participant_count'] ?? 0),
+        'total_violations'         => (int)($row['total_violations'] ?? 0),
     ];
 }
 
@@ -76,9 +79,17 @@ try {
         $latestActive = !empty($_GET['latest_active']);
         $fields = sanitize_string($_GET['fields'] ?? '');
 
+        // Base select columns including subqueries for participant count and violations
+        $sessionSelectCols = "
+            s.*,
+            (SELECT COUNT(*) FROM participants WHERE session_id = s.id) AS participant_count,
+            (SELECT COUNT(*) FROM participants WHERE session_id = s.id AND is_completed = 0) AS active_participant_count,
+            (SELECT COALESCE(SUM(violation_count), 0) FROM participants WHERE session_id = s.id) AS total_violations
+        ";
+
         // 1. Get single session by ID
         if ($id !== '') {
-            $stmt = $pdo->prepare("SELECT s.*, q.teacher_id FROM quiz_sessions s LEFT JOIN quizzes q ON s.quiz_id = q.id WHERE s.id = :id LIMIT 1");
+            $stmt = $pdo->prepare("SELECT {$sessionSelectCols}, q.teacher_id FROM quiz_sessions s LEFT JOIN quizzes q ON s.quiz_id = q.id WHERE s.id = :id LIMIT 1");
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
 
@@ -95,7 +106,71 @@ try {
                 send_error_response('Akses ditolak. Anda tidak memiliki izin untuk mengakses sesi kuis ini.', 403);
             }
 
-            send_success_response(format_session_row($row));
+            $formatted = format_session_row($row);
+
+            // Optional: attach detailed participants list for monitoring view
+            if (!empty($_GET['with_participants']) || !empty($_GET['monitoring'])) {
+                $pStmt = $pdo->prepare("SELECT * FROM participants WHERE session_id = :sid ORDER BY score DESC, joined_at ASC");
+                $pStmt->execute([':sid' => $id]);
+                $pRows = $pStmt->fetchAll();
+                $formatted['participants'] = array_map(function($p) {
+                    return [
+                        'id'                => (string)$p['id'],
+                        'session_id'        => (string)$p['session_id'],
+                        'student_id'        => $p['student_id'] !== null ? (string)$p['student_id'] : null,
+                        'display_name'      => (string)$p['display_name'],
+                        'score'             => (int)($p['score'] ?? 0),
+                        'lives'             => (int)($p['lives'] ?? 3),
+                        'current_progress'  => (int)($p['current_progress'] ?? 0),
+                        'violation_count'   => (int)($p['violation_count'] ?? 0),
+                        'is_completed'      => (bool)($p['is_completed'] ?? 0),
+                        'joined_at'         => (string)$p['joined_at'],
+                    ];
+                }, $pRows);
+                $formatted['participant_count'] = count($formatted['participants']);
+                $formatted['active_participant_count'] = count(array_filter($formatted['participants'], fn($p) => !$p['is_completed']));
+                $formatted['total_violations'] = array_sum(array_column($formatted['participants'], 'violation_count'));
+
+                // Fetch violation logs for this session
+                $vStmt = $pdo->prepare("
+                    SELECT id, user_id, action, details, created_at
+                    FROM activity_logs
+                    WHERE action = 'CHEAT_VIOLATION' AND details LIKE :sdet
+                    ORDER BY created_at DESC
+                ");
+                $vStmt->execute([':sdet' => "%Sesi: {$id}%"]);
+                $vRows = $vStmt->fetchAll();
+
+                $violationsList = [];
+                foreach ($vRows as $vr) {
+                    $details = (string)$vr['details'];
+                    $studentName = 'Peserta';
+                    if (preg_match("/Peserta '([^']+)'/", $details, $m)) {
+                        $studentName = $m[1];
+                    }
+                    $reason = 'Pelanggaran anti-cheat';
+                    if (preg_match("/anti-cheat:\s*(.*?)\s*\(Sesi:/", $details, $m)) {
+                        $reason = $m[1];
+                    }
+                    $count = 1;
+                    if (preg_match("/Ke-(\d+)/", $details, $m)) {
+                        $count = (int)$m[1];
+                    }
+
+                    $violationsList[] = [
+                        'id'           => (string)$vr['id'],
+                        'student_id'   => $vr['user_id'] !== null ? (string)$vr['user_id'] : null,
+                        'student_name' => $studentName,
+                        'reason'       => $reason,
+                        'count'        => $count,
+                        'status'       => 'Terkonfirmasi di Server',
+                        'created_at'   => (string)$vr['created_at'],
+                    ];
+                }
+                $formatted['violations'] = $violationsList;
+            }
+
+            send_success_response($formatted);
         }
 
         // Check ownership when a teacher queries by quiz_id
@@ -124,9 +199,9 @@ try {
         // 3. Query latest active session for quiz (SessionService.getLatestActiveSession)
         if ($quizId !== '' && ($latestActive || (empty($hostId) && ($statusParam === 'active' || strpos($statusParam, 'lobby') !== false)))) {
             $stmt = $pdo->prepare("
-                SELECT * FROM quiz_sessions 
-                WHERE quiz_id = :quiz_id AND status IN ('lobby', 'active')
-                ORDER BY created_at DESC 
+                SELECT {$sessionSelectCols} FROM quiz_sessions s 
+                WHERE s.quiz_id = :quiz_id AND s.status IN ('lobby', 'active')
+                ORDER BY s.created_at DESC 
                 LIMIT 1
             ");
             $stmt->execute([':quiz_id' => $quizId]);
@@ -141,9 +216,9 @@ try {
         // 4. Query active sessions for quiz by host (SessionService.getActiveSessionsForQuiz)
         if ($quizId !== '' && $hostId !== '') {
             $stmt = $pdo->prepare("
-                SELECT * FROM quiz_sessions 
-                WHERE quiz_id = :quiz_id AND host_id = :host_id AND status IN ('lobby', 'active')
-                ORDER BY created_at DESC
+                SELECT {$sessionSelectCols} FROM quiz_sessions s 
+                WHERE s.quiz_id = :quiz_id AND s.host_id = :host_id AND s.status IN ('lobby', 'active')
+                ORDER BY s.created_at DESC
             ");
             $stmt->execute([':quiz_id' => $quizId, ':host_id' => $hostId]);
             $rows = $stmt->fetchAll();
@@ -153,9 +228,9 @@ try {
         // 5. Query sessions for quiz
         if ($quizId !== '') {
             $stmt = $pdo->prepare("
-                SELECT * FROM quiz_sessions 
-                WHERE quiz_id = :quiz_id 
-                ORDER BY created_at DESC
+                SELECT {$sessionSelectCols} FROM quiz_sessions s 
+                WHERE s.quiz_id = :quiz_id 
+                ORDER BY s.created_at DESC
             ");
             $stmt->execute([':quiz_id' => $quizId]);
             $rows = $stmt->fetchAll();
@@ -168,12 +243,12 @@ try {
         $userRole = (string)($auth['role'] ?? '');
 
         if ($userRole === 'admin') {
-            $stmt = $pdo->query("SELECT * FROM quiz_sessions ORDER BY created_at DESC LIMIT 100");
+            $stmt = $pdo->query("SELECT {$sessionSelectCols} FROM quiz_sessions s ORDER BY s.created_at DESC LIMIT 100");
         } elseif ($userId !== '') {
-            $stmt = $pdo->prepare("SELECT * FROM quiz_sessions WHERE host_id = :host_id ORDER BY created_at DESC LIMIT 100");
+            $stmt = $pdo->prepare("SELECT {$sessionSelectCols} FROM quiz_sessions s WHERE s.host_id = :host_id ORDER BY s.created_at DESC LIMIT 100");
             $stmt->execute([':host_id' => $userId]);
         } else {
-            $stmt = $pdo->query("SELECT * FROM quiz_sessions WHERE status IN ('lobby', 'active') ORDER BY created_at DESC LIMIT 50");
+            $stmt = $pdo->query("SELECT {$sessionSelectCols} FROM quiz_sessions s WHERE s.status IN ('lobby', 'active') ORDER BY s.created_at DESC LIMIT 50");
         }
 
         $rows = $stmt->fetchAll();

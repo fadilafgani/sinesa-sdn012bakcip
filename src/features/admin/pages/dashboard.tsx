@@ -28,7 +28,10 @@ import {
   ChevronRight,
   UploadCloud,
   Menu,
-  RefreshCw
+  RefreshCw,
+  ShieldAlert,
+  CheckCircle2,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
@@ -87,6 +90,65 @@ export const AdminDashboard: React.FC = () => {
   const [avatarProgress, setAvatarProgress] = useState<number | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [showPasswordText, setShowPasswordText] = useState(false);
+
+  // Session Monitoring Modal states
+  const [monitoringSessionId, setMonitoringSessionId] = useState<string | null>(null);
+  const [monitoringSession, setMonitoringSession] = useState<QuizSession | null>(null);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
+
+  const fetchSessionMonitoring = async (sessionId: string, isSilent = false) => {
+    if (!isSilent) setMonitoringLoading(true);
+    setMonitoringError(null);
+    try {
+      if (isMock) {
+        const sess = sessions.find(s => s.id === sessionId);
+        if (sess) {
+          setMonitoringSession(sess);
+        } else {
+          setMonitoringError('Sesi kuis tidak ditemukan.');
+        }
+        return;
+      }
+
+      const res = await SessionService.getSessionWithParticipants(sessionId);
+      if (res.success && res.data) {
+        setMonitoringSession(res.data);
+        // Synchronize with session listing so card counts match immediately
+        setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, ...res.data } : s));
+      } else {
+        setMonitoringError(res.error || 'Gagal memuat data monitoring sesi.');
+      }
+    } catch (err: any) {
+      setMonitoringError(err?.message || 'Terjadi kesalahan saat memuat data sesi.');
+    } finally {
+      if (!isSilent) setMonitoringLoading(false);
+    }
+  };
+
+  const handleOpenMonitoringModal = (session: QuizSession) => {
+    setMonitoringSessionId(session.id);
+    setMonitoringSession(session);
+    fetchSessionMonitoring(session.id, false);
+  };
+
+  const handleCloseMonitoringModal = () => {
+    setMonitoringSessionId(null);
+    setMonitoringSession(null);
+    setMonitoringError(null);
+  };
+
+  // Live polling for monitoring modal while open (every 2.5s)
+  useEffect(() => {
+    if (!monitoringSessionId) return;
+
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchSessionMonitoring(monitoringSessionId, true);
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [monitoringSessionId]);
 
   // Filters & Searching & Pagination
   const [userSearch, setUserSearch] = useState('');
@@ -313,6 +375,17 @@ export const AdminDashboard: React.FC = () => {
         const statsData = await useAdminStore.getState().fetchStats(true);
         if (statsData?.recent_logs) {
           setLogs(statsData.recent_logs);
+          const cheatLogs = statsData.recent_logs.filter((l: any) => l.action === 'CHEAT_VIOLATION');
+          if (cheatLogs.length > 0) {
+            setNotifications(cheatLogs.map((l: any) => ({
+              id: `cheat-notif-${l.id}`,
+              title: 'Peringatan Kecurangan Siswa',
+              message: l.details || `Pelanggaran anti-cheat terkonfirmasi: ${l.user_name || 'Peserta'}`,
+              type: 'warning',
+              is_read: false,
+              created_at: l.created_at
+            })));
+          }
         }
 
         // Fetch profiles
@@ -418,6 +491,17 @@ export const AdminDashboard: React.FC = () => {
         const statsData = await useAdminStore.getState().fetchStats(false);
         if (statsData?.recent_logs) {
           setLogs(statsData.recent_logs);
+          const cheatLogs = statsData.recent_logs.filter((l: any) => l.action === 'CHEAT_VIOLATION');
+          if (cheatLogs.length > 0) {
+            setNotifications(cheatLogs.map((l: any) => ({
+              id: `cheat-notif-${l.id}`,
+              title: 'Peringatan Kecurangan Siswa',
+              message: l.details || `Pelanggaran anti-cheat terkonfirmasi: ${l.user_name || 'Peserta'}`,
+              type: 'warning',
+              is_read: false,
+              created_at: l.created_at
+            })));
+          }
         }
         const sessRes = await SessionService.getAllSessions();
         if (sessRes.success && sessRes.data) {
@@ -887,7 +971,12 @@ export const AdminDashboard: React.FC = () => {
   const totalStudentsCount = stats?.users?.students ?? profiles.filter(p => p.role === 'student').length;
   const totalQuizzesCount = stats?.quizzes?.total ?? quizzes.length;
   const totalSessionsCount = stats?.sessions?.total ?? sessions.length;
-  const totalActiveUsers = stats?.users?.active ?? userSessions.filter(s => s.is_online).length;
+  const activeParticipantsInSessions = sessions
+    .filter(s => s.status !== 'completed')
+    .reduce((acc, s) => acc + (s.participant_count ?? 0), 0);
+  const totalActiveUsers = (stats?.users?.active && stats.users.active > 0)
+    ? Math.max(stats.users.active, activeParticipantsInSessions)
+    : Math.max(activeParticipantsInSessions, userSessions.filter(s => s.is_online).length);
   const totalAnswersProcessed = stats?.gameplay?.total_answers ?? 0;
   const totalStorageBytes = stats?.storage?.total_bytes ?? 0;
 
@@ -943,6 +1032,7 @@ export const AdminDashboard: React.FC = () => {
           {/* Menu Items */}
           <nav className="p-4 space-y-1">
             <button
+              data-testid="tab-dashboard"
               onClick={() => setActiveTab('dashboard')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition active:scale-[0.98] ${
                 activeTab === 'dashboard'
@@ -955,6 +1045,7 @@ export const AdminDashboard: React.FC = () => {
             </button>
             
             <button
+              data-testid="tab-users"
               onClick={() => setActiveTab('users')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition active:scale-[0.98] ${
                 activeTab === 'users'
@@ -967,6 +1058,7 @@ export const AdminDashboard: React.FC = () => {
             </button>
 
             <button
+              data-testid="tab-quizzes"
               onClick={() => setActiveTab('quizzes')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition active:scale-[0.98] ${
                 activeTab === 'quizzes'
@@ -979,6 +1071,7 @@ export const AdminDashboard: React.FC = () => {
             </button>
 
             <button
+              data-testid="tab-logs"
               onClick={() => setActiveTab('logs')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition active:scale-[0.98] ${
                 activeTab === 'logs'
@@ -991,6 +1084,7 @@ export const AdminDashboard: React.FC = () => {
             </button>
 
             <button
+              data-testid="tab-settings"
               onClick={() => setActiveTab('settings')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-semibold transition active:scale-[0.98] ${
                 activeTab === 'settings'
@@ -1244,30 +1338,74 @@ export const AdminDashboard: React.FC = () => {
                           <Globe className="h-4.5 w-4.5 text-blue-500 animate-pulse" /> Sesi Aktif Online ({totalActiveUsers})
                         </h4>
                         <div className="divide-y divide-border/50 max-h-72 overflow-y-auto space-y-2">
-                          {userSessions.map(us => {
-                            const u = profiles.find(p => p.id === us.user_id);
-                            return (
-                              <div key={us.id} className="flex items-center justify-between py-2 text-xs">
-                                <div className="flex items-center gap-2 text-left">
-                                  <div className="relative">
-                                    <LazyImage 
-                                      src={u?.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u?.full_name || 'us')}`}
-                                      alt="Avatar"
-                                      className="h-8 w-8 rounded-lg bg-background"
-                                    />
-                                    <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-card ${us.is_online ? 'bg-green-500 animate-pulse' : 'bg-zinc-500'}`} />
+                          {sessions.filter(s => s.status !== 'completed').length > 0 ? (
+                            sessions.filter(s => s.status !== 'completed').map(s => {
+                              const q = quizzes.find(quiz => quiz.id === s.quiz_id);
+                              const pCount = s.participant_count ?? 0;
+                              const vCount = s.total_violations ?? 0;
+                              return (
+                                <div key={s.id} className="flex items-center justify-between py-2 text-xs">
+                                  <div className="flex items-center gap-2 text-left">
+                                    <div className="relative">
+                                      <div className="h-8 w-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center font-black text-amber-500 text-xs">
+                                        Q
+                                      </div>
+                                      <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-card bg-green-500 animate-pulse" />
+                                    </div>
+                                    <div>
+                                      <span className="font-bold text-foreground block line-clamp-1">{q?.title || 'Kuis Aktif'}</span>
+                                      <span className="text-[10px] text-muted-foreground block">
+                                        PIN: {q?.pin_code || s.pin_code || '------'} • {pCount} Peserta
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <span className="font-bold text-foreground block">{u?.full_name || 'System User'}</span>
-                                    <span className="text-[10px] text-muted-foreground block">{us.user_agent || 'Unknown browser'}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {vCount > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-red-500/15 text-red-500 border border-red-500/30">
+                                        ⚠️ {vCount}
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenMonitoringModal(s)}
+                                      className="text-[9px] text-amber-500 hover:text-amber-400 font-bold bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded-lg border border-amber-500/20 transition"
+                                    >
+                                      Pantau
+                                    </button>
                                   </div>
                                 </div>
-                                <span className="text-[9px] text-muted-foreground font-semibold">
-                                  {us.is_online ? 'Online' : 'Offline'}
-                                </span>
-                              </div>
-                            );
-                          })}
+                              );
+                            })
+                          ) : userSessions.length > 0 ? (
+                            userSessions.map(us => {
+                              const u = profiles.find(p => p.id === us.user_id);
+                              return (
+                                <div key={us.id} className="flex items-center justify-between py-2 text-xs">
+                                  <div className="flex items-center gap-2 text-left">
+                                    <div className="relative">
+                                      <LazyImage 
+                                        src={u?.avatar_url || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u?.full_name || 'us')}`}
+                                        alt="Avatar"
+                                        className="h-8 w-8 rounded-lg bg-background"
+                                      />
+                                      <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-card ${us.is_online ? 'bg-green-500 animate-pulse' : 'bg-zinc-500'}`} />
+                                    </div>
+                                    <div>
+                                      <span className="font-bold text-foreground block">{u?.full_name || 'System User'}</span>
+                                      <span className="text-[10px] text-muted-foreground block">{us.user_agent || 'Unknown browser'}</span>
+                                    </div>
+                                  </div>
+                                  <span className="text-[9px] text-muted-foreground font-semibold">
+                                    {us.is_online ? 'Online' : 'Offline'}
+                                  </span>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <p className="text-xs italic text-muted-foreground py-6 text-center">
+                              Tidak ada sesi atau pengguna aktif saat ini.
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -1667,25 +1805,68 @@ export const AdminDashboard: React.FC = () => {
                           sessions.filter(s => s.status !== 'completed').map(s => {
                             const q = quizzes.find(quiz => quiz.id === s.quiz_id);
                             const host = profiles.find(p => p.id === s.host_id);
+                            const partCount = s.participant_count ?? 0;
+                            const violCount = s.total_violations ?? 0;
+
                             return (
-                              <div key={s.id} className="glass-panel p-5 rounded-3xl border bg-card/25 text-left flex flex-col justify-between space-y-4 shadow hover:border-amber-500/20 transition">
-                                <div className="space-y-1">
+                              <div 
+                                key={s.id} 
+                                data-testid={`session-card-${s.id}`} 
+                                className="glass-panel p-5 rounded-3xl border bg-card/25 text-left flex flex-col justify-between space-y-4 shadow hover:border-amber-500/20 transition"
+                              >
+                                <div className="space-y-2">
                                   <div className="flex items-center justify-between">
-                                    <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
-                                      s.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'
-                                    }`}>
+                                    <span 
+                                      data-testid={`session-status-${s.id}`}
+                                      className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                                        s.status === 'active' ? 'bg-green-500/10 text-green-500' : 'bg-blue-500/10 text-blue-500'
+                                      }`}
+                                    >
                                       {s.status === 'active' ? '🔴 Sesi Aktif' : '🔵 Menunggu di Lobby'}
                                     </span>
                                     <span className="font-mono text-xs font-bold text-muted-foreground">
-                                      PIN: {q?.pin_code || '------'}
+                                      PIN: {q?.pin_code || s.pin_code || '------'}
                                     </span>
                                   </div>
+                                  
                                   <h4 className="font-extrabold text-sm text-foreground line-clamp-1">{q?.title || 'Kuis Tanpa Judul'}</h4>
-                                  <span className="text-[10px] text-muted-foreground font-semibold block">Host: {host?.full_name || 'Host'}</span>
+                                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                    <span className="font-semibold">Host: {host?.full_name || 'Host'}</span>
+                                    <span data-testid={`session-connection-status-${s.id}`} className="flex items-center gap-1 text-[10px] font-bold text-emerald-500">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                      ONLINE
+                                    </span>
+                                  </div>
+
+                                  {/* Participant and Violation Telemetry Counters */}
+                                  <div className="grid grid-cols-2 gap-2 pt-1">
+                                    <div className="p-2.5 rounded-2xl bg-card/40 border border-border/50">
+                                      <span className="text-[9px] uppercase font-bold text-muted-foreground block">Jumlah Peserta</span>
+                                      <span data-testid={`session-participants-count-${s.id}`} className="text-sm font-black text-foreground">
+                                        {partCount} Peserta
+                                      </span>
+                                    </div>
+                                    <div className={`p-2.5 rounded-2xl border ${
+                                      violCount > 0 ? 'bg-red-500/10 border-red-500/30 text-red-500' : 'bg-card/40 border-border/50 text-muted-foreground'
+                                    }`}>
+                                      <span className="text-[9px] uppercase font-bold block">Pelanggaran</span>
+                                      <span data-testid={`session-violations-count-${s.id}`} className={`text-sm font-black ${violCount > 0 ? 'text-red-500 font-extrabold' : 'text-foreground'}`}>
+                                        {violCount > 0 ? `⚠️ ${violCount} Pelanggaran` : '0 Pelanggaran'}
+                                      </span>
+                                    </div>
+                                  </div>
                                 </div>
-                                <div className="border-t border-border/50 pt-3 flex items-center justify-between text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                                  <span>Soal Ke: {s.current_question_index + 1}</span>
-                                  <span className="text-primary font-black">Online Monitoring</span>
+
+                                <div className="border-t border-border/50 pt-3 flex items-center justify-between text-[10px] text-muted-foreground">
+                                  <span className="font-bold uppercase tracking-wider">Soal Ke: {s.current_question_index + 1}</span>
+                                  <button
+                                    type="button"
+                                    data-testid={`btn-monitor-session-${s.id}`}
+                                    onClick={() => handleOpenMonitoringModal(s)}
+                                    className="px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/30 font-bold transition flex items-center gap-1 active:scale-95"
+                                  >
+                                    <Activity className="h-3.5 w-3.5" /> Pantau Sesi
+                                  </button>
                                 </div>
                               </div>
                             );
@@ -2321,6 +2502,329 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Session Realtime Monitoring Modal */}
+      {monitoringSessionId && (
+        <div 
+          data-testid="admin-session-monitoring-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 15 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="glass-panel w-full max-w-4xl max-h-[92vh] flex flex-col rounded-3xl shadow-2xl border-border bg-background overflow-hidden my-auto"
+          >
+            {/* Header & Content */}
+            {(() => {
+              const currentSess = monitoringSession || sessions.find(s => s.id === monitoringSessionId);
+              const q = quizzes.find(quiz => quiz.id === currentSess?.quiz_id);
+              const host = profiles.find(p => p.id === currentSess?.host_id);
+              const participants = currentSess?.participants || [];
+              const participantCount = currentSess?.participant_count ?? participants.length;
+              const totalViolations = currentSess?.total_violations ?? participants.reduce((sum, p) => sum + (p.violation_count || 0), 0);
+
+              // Extract & merge violations
+              const rawViolations = currentSess?.violations || [];
+              const participantViolations = participants
+                .filter(p => (p.violation_count || 0) > 0)
+                .map(p => ({
+                  id: `pviol-${p.id}`,
+                  student_id: p.student_id,
+                  student_name: p.display_name,
+                  reason: 'Pelanggaran anti-cheat / keluar layar kuis terdeteksi',
+                  count: p.violation_count,
+                  status: 'Terkonfirmasi di Server',
+                  created_at: p.joined_at || new Date().toISOString()
+                }));
+
+              const mergedViolations: typeof rawViolations = [...rawViolations];
+              participantViolations.forEach(pv => {
+                const exists = mergedViolations.some(v => 
+                  (pv.student_id && v.student_id === pv.student_id) || 
+                  (v.student_name && v.student_name === pv.student_name)
+                );
+                if (!exists) {
+                  mergedViolations.push(pv);
+                }
+              });
+
+              return (
+                <>
+                  <div className="flex items-center justify-between border-b border-border p-5 bg-card/60">
+                    <div className="text-left space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <h3 className="text-sm font-black text-foreground">
+                          Monitoring Sesi Kuis Realtime
+                        </h3>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-500 font-bold border border-amber-500/30">
+                          PIN: {q?.pin_code || currentSess?.pin_code || '------'}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-500/15 text-purple-400 font-bold border border-purple-500/30 uppercase">
+                          {(q?.quiz_mode === 'serius' || (currentSess as any)?.quiz_mode === 'serius') ? 'Mode Serius' : 'Mode Santai'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-1">
+                        {q?.title || 'Kuis Tanpa Judul'} • Dipandu oleh: <span className="font-semibold text-foreground">{host?.full_name || 'Guru'}</span>
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => fetchSessionMonitoring(monitoringSessionId, false)}
+                        disabled={monitoringLoading}
+                        className="p-2 rounded-xl border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition disabled:opacity-50"
+                        title="Segarkan data monitoring"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${monitoringLoading ? 'animate-spin text-amber-500' : ''}`} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCloseMonitoringModal}
+                        className="p-2 rounded-xl border border-border bg-card hover:bg-accent text-muted-foreground hover:text-foreground transition"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="p-6 space-y-6 overflow-y-auto max-h-[calc(92vh-80px)] text-left">
+                    {/* Top 4 Metrics Summary Cards */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                      <div className="glass-panel p-4 rounded-2xl border bg-card/40 space-y-1">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Status Sesi</span>
+                        <h4 
+                          data-testid="monitor-status-session"
+                          className="text-sm font-black text-foreground flex items-center gap-1.5"
+                        >
+                          {currentSess?.status === 'active' ? (
+                            <span className="text-emerald-500">🔴 SESI AKTIF</span>
+                          ) : currentSess?.status === 'lobby' ? (
+                            <span className="text-blue-500">🔵 MENUNGGU DI LOBBY</span>
+                          ) : (
+                            <span className="text-muted-foreground">⚫ SESI SELESAI</span>
+                          )}
+                        </h4>
+                      </div>
+
+                      <div className="glass-panel p-4 rounded-2xl border bg-card/40 space-y-1">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Status Koneksi</span>
+                        <h4 
+                          data-testid="monitor-connection-status"
+                          className="text-sm font-black text-emerald-500 flex items-center gap-1.5"
+                        >
+                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                          ONLINE
+                        </h4>
+                      </div>
+
+                      <div className="glass-panel p-4 rounded-2xl border bg-card/40 space-y-1">
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Jumlah Peserta</span>
+                        <h4 
+                          data-testid="monitor-participant-count"
+                          className="text-sm font-black text-foreground"
+                        >
+                          {participantCount} Peserta
+                        </h4>
+                      </div>
+
+                      <div className={`glass-panel p-4 rounded-2xl border space-y-1 ${
+                        totalViolations > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-card/40'
+                      }`}>
+                        <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block">Total Pelanggaran</span>
+                        <h4 
+                          data-testid="monitor-total-violations"
+                          className={`text-sm font-black ${totalViolations > 0 ? 'text-red-500' : 'text-foreground'}`}
+                        >
+                          {totalViolations > 0 ? `⚠️ ${totalViolations} Pelanggaran` : '0 Pelanggaran'}
+                        </h4>
+                      </div>
+                    </div>
+
+                    {/* Anti-Cheat Realtime Violation Alerts Panel */}
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-amber-500" /> Peringatan Pelanggaran Anti-Cheat Realtime
+                      </h4>
+
+                      <div data-testid="monitoring-violation-alert-panel" className="space-y-2">
+                        {mergedViolations.length > 0 ? (
+                          mergedViolations.map((v, idx) => (
+                            <div 
+                              key={v.id || `viol-${idx}`}
+                              data-testid={`violation-card-${v.id || v.student_id || idx}`}
+                              className="glass-panel p-4 rounded-2xl border border-red-500/30 bg-red-500/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm hover:border-red-500/50 transition"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span data-testid="violation-student-name" className="font-extrabold text-foreground text-sm">
+                                    {v.student_name}
+                                  </span>
+                                  <span 
+                                    data-testid="violation-status"
+                                    className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-red-500/20 text-red-500 border border-red-500/30"
+                                  >
+                                    {v.status || 'Terkonfirmasi di Server'}
+                                  </span>
+                                </div>
+                                <p data-testid="violation-type" className="text-xs text-red-500 dark:text-red-400 font-medium">
+                                  {v.reason}
+                                </p>
+                              </div>
+                              <div className="flex sm:flex-col items-end justify-between sm:justify-center gap-1 shrink-0 text-right">
+                                <span 
+                                  data-testid="violation-count"
+                                  className="text-xs font-black text-red-600 dark:text-red-400 bg-red-500/10 px-2 py-0.5 rounded-lg border border-red-500/20"
+                                >
+                                  Pelanggaran ke-{v.count}
+                                </span>
+                                <span data-testid="violation-time" className="text-[10px] text-muted-foreground flex items-center gap-1 font-mono">
+                                  <Clock className="h-3 w-3" />
+                                  {v.created_at ? new Date(v.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                                </span>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div 
+                            data-testid="monitoring-no-violations"
+                            className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center gap-2 text-xs font-semibold"
+                          >
+                            <CheckCircle2 className="h-4 w-4 shrink-0" />
+                            <span>Tidak ada pelanggaran anti-cheat terdeteksi pada sesi ini. Semua peserta mematuhi aturan ujian.</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Participants Telemetry Table */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-border/50 pb-2">
+                        <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                          <Users className="h-4 w-4 text-primary" /> Daftar Peserta Terhubung ({participants.length})
+                        </h4>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          Pembaruan otomatis tiap 2.5 detik
+                        </span>
+                      </div>
+
+                      {monitoringLoading && !currentSess ? (
+                        <div data-testid="monitoring-loading-state" className="p-12 text-center text-muted-foreground space-y-2">
+                          <RefreshCw className="h-6 w-6 animate-spin mx-auto text-amber-500" />
+                          <p className="text-xs">Memuat data telemetri sesi kuis...</p>
+                        </div>
+                      ) : monitoringError ? (
+                        <div data-testid="monitoring-error-state" className="p-6 text-center text-red-500 bg-red-500/10 border border-red-500/20 rounded-2xl space-y-2">
+                          <AlertTriangle className="h-6 w-6 mx-auto text-red-500" />
+                          <p className="text-xs font-bold">{monitoringError}</p>
+                          <button
+                            type="button"
+                            onClick={() => fetchSessionMonitoring(monitoringSessionId, false)}
+                            className="text-[11px] underline font-semibold hover:text-red-400"
+                          >
+                            Coba muat ulang data
+                          </button>
+                        </div>
+                      ) : participants.length === 0 ? (
+                        <div data-testid="monitoring-empty-state" className="p-10 text-center text-muted-foreground border border-dashed rounded-3xl bg-card/10 space-y-1">
+                          <Users className="h-6 w-6 mx-auto text-muted-foreground/60" />
+                          <p className="text-xs font-medium">Belum ada peserta yang bergabung ke sesi ini.</p>
+                          <p className="text-[10px] text-muted-foreground">Berikan PIN {q?.pin_code || currentSess?.pin_code || '------'} kepada peserta untuk bergabung.</p>
+                        </div>
+                      ) : (
+                        <div data-testid="monitoring-participants-table" className="overflow-x-auto rounded-2xl border border-border bg-card/25">
+                          <table className="w-full text-xs text-left">
+                            <thead className="bg-card/60 text-muted-foreground font-bold uppercase text-[9px] border-b border-border">
+                              <tr>
+                                <th className="p-3 pl-4">Peserta</th>
+                                <th className="p-3">Status Koneksi</th>
+                                <th className="p-3 text-right">Skor</th>
+                                <th className="p-3 text-center">Progress</th>
+                                <th className="p-3 text-center">Sisa Nyawa</th>
+                                <th className="p-3 pr-4 text-center">Pelanggaran</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50 font-medium">
+                              {participants.map((p) => (
+                                <tr 
+                                  key={p.id} 
+                                  data-testid={`participant-row-${p.id}`}
+                                  className={`hover:bg-accent/40 transition ${
+                                    (p.violation_count || 0) > 0 ? 'bg-red-500/5' : ''
+                                  }`}
+                                >
+                                  <td className="p-3 pl-4">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="relative">
+                                        <LazyImage 
+                                          src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
+                                          alt={p.display_name}
+                                          className="h-8 w-8 rounded-xl bg-background border border-border"
+                                        />
+                                        <span className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-card ${
+                                          p.is_completed ? 'bg-zinc-500' : 'bg-emerald-500 animate-pulse'
+                                        }`} />
+                                      </div>
+                                      <div>
+                                        <span className="font-bold text-foreground block">{p.display_name}</span>
+                                        <span className="text-[10px] text-muted-foreground">
+                                          Bergabung: {p.joined_at ? new Date(p.joined_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="p-3">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      p.is_completed 
+                                        ? 'bg-zinc-500/10 text-zinc-400' 
+                                        : 'bg-emerald-500/10 text-emerald-500'
+                                    }`}>
+                                      {p.is_completed ? 'Selesai' : 'Online / Aktif'}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-right font-mono font-bold text-foreground">
+                                    {p.score}
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className="px-2 py-0.5 rounded-lg bg-card border border-border text-[10px] font-mono">
+                                      Soal {p.current_progress + 1}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-center">
+                                    <span className="text-red-500 font-mono font-bold">
+                                      ❤️ {p.lives}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 pr-4 text-center">
+                                    {(p.violation_count || 0) > 0 ? (
+                                      <span 
+                                        data-testid="participant-violation-badge"
+                                        className="px-2.5 py-1 rounded-xl bg-red-500/15 text-red-500 border border-red-500/30 font-black text-[10px]"
+                                      >
+                                        ⚠️ {p.violation_count} Pelanggaran
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-muted-foreground font-semibold">
+                                        0 Pelanggaran
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </motion.div>
         </div>
       )}

@@ -104,6 +104,21 @@ export interface QuizSession {
   created_at: string;
   completed_at: string | null;
   quiz?: Quiz;
+  participant_count?: number;
+  active_participant_count?: number;
+  total_violations?: number;
+  participants?: Participant[];
+  violations?: SessionViolationEvent[];
+}
+
+export interface SessionViolationEvent {
+  id: string;
+  student_id: string | null;
+  student_name: string;
+  reason: string;
+  count: number;
+  status: string;
+  created_at: string;
 }
 
 export interface ParticipantStats {
