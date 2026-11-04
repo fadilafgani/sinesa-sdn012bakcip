@@ -18,7 +18,7 @@ import { LatexRenderer } from '@/shared/components/latex-renderer';
 import { 
   Award, Volume2, Check, X, ArrowLeft, Heart, SkipForward, Send, 
   AlertCircle, Eye, Users, Clock, CheckCircle2, RefreshCw,
-  XCircle, HelpCircle, Target
+  XCircle, HelpCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { showConfirm, showError } from '@/shared/utils/swal';
@@ -1060,7 +1060,7 @@ export const PlaySession: React.FC = () => {
                 </span>
               );
 
-              if (isTimeout || status === 'skipped') {
+              if (isTimeout) {
                 badge = (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">
                     Tidak Dijawab

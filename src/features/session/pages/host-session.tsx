@@ -29,7 +29,7 @@ import { LeaderboardService } from '@/features/leaderboard/services/leaderboard.
 import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import { useParticipantStore } from '@/features/participant/stores/participant-store';
 
-export type HostState = 'loading' | 'success' | 'access_denied' | 'not_found' | 'error';
+export type HostPageState = 'loading' | 'success' | 'access_denied' | 'not_found' | 'error';
 
 export interface HostErrorInfo {
   title: string;
@@ -154,7 +154,7 @@ export const HostSession: React.FC = () => {
   const [lastPollTime, setLastPollTime] = useState<string>('Never');
   
   // Host Page Lifecycle State Machine
-  const [hostState, setHostState] = useState<HostState>('loading');
+  const [hostState, setHostState] = useState<HostPageState>('loading');
   const [errorInfo, setErrorInfo] = useState<HostErrorInfo | null>(null);
 
   useEffect(() => {

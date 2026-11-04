@@ -25,7 +25,7 @@ let studentRealtimeUnsubs: (() => void)[] = [];
 let creationPromise: Promise<string | null> | null = null;
 let joinPromise: Promise<boolean> | null = null;
 let activeSessionUpdateSeq = 0;
-let participantsFetchPromises: Record<string, Promise<void>> = {};
+let participantsFetchPromises: Record<string, Promise<void> | undefined> = {};
 
 const refreshAuth = async () => {
   // Only refresh if access token exists (guest participants do not have tokens)

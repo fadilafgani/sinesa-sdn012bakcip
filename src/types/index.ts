@@ -78,6 +78,7 @@ export interface QuizSession {
   id: string;
   quiz_id: string;
   host_id: string;
+  pin_code?: string;
   status: 'lobby' | 'active' | 'completed';
   current_stage: 'waiting' | 'countdown' | 'question' | 'question_result' | 'leaderboard' | 'finished';
   current_question_index: number;

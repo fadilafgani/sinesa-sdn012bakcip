@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { QuizService } from '@/features/quiz/services/quiz.service';
@@ -807,7 +807,7 @@ export const Analytics: React.FC = () => {
                 >
                   {quizSessions.map((s, idx) => (
                     <option key={s.id} value={s.id}>
-                      Sesi {quizSessions.length - idx} (PIN: {s.pin_code || '—'}) • {s.status.toUpperCase()}
+                      Sesi {quizSessions.length - idx} (PIN: {s.pin_code || s.quiz?.pin_code || quiz?.pin_code || '—'}) • {s.status.toUpperCase()}
                     </option>
                   ))}
                 </select>

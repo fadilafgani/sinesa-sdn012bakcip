@@ -23,6 +23,7 @@ export class RealtimeChannelManager {
   public sessionId: string | null = null;
   public participantId: string | null = null;
   public role: 'host' | 'student' | null = null;
+  public status: RealtimeStatus = 'DISCONNECTED';
 
   // State management & watchdog timers
   private reconnectTimeout: any = null;
@@ -62,6 +63,7 @@ export class RealtimeChannelManager {
   }
 
   private setStatus(status: RealtimeStatus) {
+    this.status = status;
     console.log('SUBSCRIPTION_STATUS', { role: this.role, sessionId: this.sessionId, status });
     logRealtime(`Status Changed: ${status}`);
     this.statusCallbacks.forEach(cb => {
