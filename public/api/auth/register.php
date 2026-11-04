@@ -66,13 +66,21 @@ $pdo = get_db();
 
 try {
     // 2. Check if registration is allowed by system settings
-    if ($role === 'student') {
-        $setStmt = $pdo->prepare("SELECT value FROM settings WHERE `key` = 'allow_student_registration' LIMIT 1");
-        $setStmt->execute();
-        $settingRow = $setStmt->fetch();
-        if ($settingRow && strtolower((string)$settingRow['value']) === 'false') {
-            send_error_response('Pendaftaran mandiri murid saat ini sedang ditutup oleh pihak sekolah.', 403);
+    $setStmt = $pdo->query("SELECT `key`, `value` FROM settings WHERE `key` IN ('registration_enabled', 'allow_registration', 'allow_student_registration')");
+    $settingsMap = [];
+    if ($setStmt) {
+        while ($row = $setStmt->fetch(PDO::FETCH_ASSOC)) {
+            $settingsMap[(string)$row['key']] = strtolower((string)$row['value']);
         }
+    }
+
+    $isRegistrationEnabled = ($settingsMap['registration_enabled'] ?? 'true') !== 'false' && ($settingsMap['allow_registration'] ?? 'true') !== 'false';
+    if (!$isRegistrationEnabled) {
+        send_error_response('Pendaftaran akun baru saat ini sedang ditutup oleh pihak sekolah/administrator.', 403);
+    }
+
+    if ($role === 'student' && ($settingsMap['allow_student_registration'] ?? 'true') === 'false') {
+        send_error_response('Pendaftaran mandiri murid saat ini sedang ditutup oleh pihak sekolah.', 403);
     }
 
     // 3. Check for existing email / username

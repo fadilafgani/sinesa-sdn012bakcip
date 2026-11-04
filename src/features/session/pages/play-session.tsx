@@ -15,8 +15,8 @@ import { useUiStore } from '@/shared/stores/ui-store';
 import { useSessionStore } from '@/features/session/stores/session-store';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LatexRenderer } from '@/shared/components/latex-renderer';
-import { 
-  Award, Volume2, Check, X, ArrowLeft, Heart, SkipForward, Send, 
+import {
+  Award, Volume2, Check, X, ArrowLeft, Heart, SkipForward, Send,
   AlertCircle, Eye, Users, Clock, CheckCircle2, RefreshCw,
   XCircle, HelpCircle
 } from 'lucide-react';
@@ -25,7 +25,6 @@ import { showConfirm, showError } from '@/shared/utils/swal';
 import { useSettingsStore } from '@/features/settings';
 import { sessionActions } from '@/features/session/stores/session-actions';
 import { QuestionService } from '@/features/question/services/question.service';
-import { SettingsService } from '@/features/settings/services/settings.service';
 import { ParticipantService } from '@/features/participant/services/participant.service';
 import { useParticipantStore } from '@/features/participant/stores/participant-store';
 import type { Option, Participant } from '@/types';
@@ -40,25 +39,19 @@ export const PlaySession: React.FC = () => {
   const pin = searchParams.get('pin');
   const name = searchParams.get('name');
 
-  // Guest settings & inline join states (UAT-033)
-  const [allowGuestParticipants, setAllowGuestParticipants] = useState<boolean | null>(null);
+  // Guest settings & inline join states (UAT-033 / UAT Guest Join Enhancement)
+  const allowGuestParticipants = settings.allow_guest_participants !== 'false';
   const [inlinePin, setInlinePin] = useState(pin || '');
   const [inlineName, setInlineName] = useState(name || '');
   const [inlineJoining, setInlineJoining] = useState(false);
   const [inlineError, setInlineError] = useState<string | null>(null);
 
   useEffect(() => {
-    SettingsService.getSystemSettings().then(res => {
-      if (res.success && res.data) {
-        const guestSetting = res.data.find(s => s.key === 'allow_guest_participants');
-        setAllowGuestParticipants(!guestSetting || guestSetting.value !== 'false');
-      } else {
-        setAllowGuestParticipants(true);
-      }
-    }).catch(() => {
-      setAllowGuestParticipants(true);
-    });
-  }, []);
+    // Clear any previous global UI error on initial mount without PIN/Name so it doesn't block the inline join form
+    if (!pin || !name) {
+      useUiStore.setState({ error: null });
+    }
+  }, [pin, name]);
 
   const { navigate } = useNavigation();
   const {
@@ -129,7 +122,7 @@ export const PlaySession: React.FC = () => {
   });
 
   const showFeedback = session?.current_stage === 'question_result';
-  const setShowFeedback = (_val: boolean) => {}; // Dummy to support legacy/unreachable self-paced code compilation
+  const setShowFeedback = (_val: boolean) => { }; // Dummy to support legacy/unreachable self-paced code compilation
   const [showReviewScreen, setShowReviewScreen] = useState(false);
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
   const [matchingAnswers, setMatchingAnswers] = useState<Record<string, string>>({});
@@ -156,7 +149,7 @@ export const PlaySession: React.FC = () => {
     }
 
     return (
-      <div 
+      <div
         data-testid="lives-indicator"
         data-lives={currentLives}
         data-max-lives={maxLives}
@@ -175,23 +168,21 @@ export const PlaySession: React.FC = () => {
                 <Heart
                   key={i}
                   data-active={isActive ? 'true' : 'false'}
-                  className={`h-4.5 w-4.5 transition-all duration-300 ${
-                    isActive
+                  className={`h-4.5 w-4.5 transition-all duration-300 ${isActive
                       ? 'fill-red-500 text-red-500 drop-shadow-sm scale-100'
                       : 'fill-zinc-300/40 text-zinc-400 dark:fill-zinc-800 dark:text-zinc-600 opacity-60 scale-95'
-                  }`}
+                    }`}
                 />
               );
             })}
           </div>
         ) : (
           <div className="flex items-center gap-1" data-testid="lives-counter-container">
-            <Heart 
-              className={`h-4.5 w-4.5 ${
-                currentLives > 0 
-                  ? 'fill-red-500 text-red-500 animate-pulse' 
+            <Heart
+              className={`h-4.5 w-4.5 ${currentLives > 0
+                  ? 'fill-red-500 text-red-500 animate-pulse'
                   : 'fill-zinc-300/40 text-zinc-400 dark:fill-zinc-800 dark:text-zinc-600'
-              }`} 
+                }`}
             />
             <span className={`text-xs font-black ${currentLives > 0 ? 'text-red-500' : 'text-zinc-500'}`}>
               {currentLives} / {maxLives}
@@ -200,7 +191,7 @@ export const PlaySession: React.FC = () => {
         )}
 
         {isDepleted && (
-          <span 
+          <span
             data-testid="badge-nyawa-habis"
             className="ml-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm animate-pulse"
           >
@@ -314,7 +305,7 @@ export const PlaySession: React.FC = () => {
   const [loadingAllOptions, setLoadingAllOptions] = useState(false);
   const [leaderboard, setLeaderboard] = useState<Participant[]>([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(false);
-  
+
   // Realtime Question Statistics & Explanation States
   const [questionStats, setQuestionStats] = useState<{ correctCount: number; incorrectCount: number; totalCount: number } | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
@@ -355,7 +346,7 @@ export const PlaySession: React.FC = () => {
 
       // Hide feedback popup for the new question
       setShowFeedback(false);
-      
+
       if (currentQuestion.question_type === 'matching' && currentOptions) {
         const matches = currentOptions
           .map(o => o.match_text || '')
@@ -489,10 +480,10 @@ export const PlaySession: React.FC = () => {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
-      
+
       if (type === 'correct') {
         osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
         osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.15); // E5
@@ -526,7 +517,7 @@ export const PlaySession: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [session?.status, isCompleted]);
 
-  
+
 
 
 
@@ -552,7 +543,7 @@ export const PlaySession: React.FC = () => {
 
   const handleToggleMultipleOption = (optionId: string) => {
     if (hasAnswered || localTimer <= 0) return;
-    setSelectedOptionIds(prev => 
+    setSelectedOptionIds(prev =>
       prev.includes(optionId) ? prev.filter(id => id !== optionId) : [...prev, optionId]
     );
   };
@@ -606,21 +597,22 @@ export const PlaySession: React.FC = () => {
   };
 
   // Rejection screen when guest access is disabled (UAT-033)
-  if (!profile && allowGuestParticipants === false) {
+  if (!profile && !allowGuestParticipants) {
     return (
-      <div className="flex h-screen items-center justify-center bg-mesh p-4">
+      <div data-testid="guest-rejection-screen" className="flex h-screen items-center justify-center bg-mesh p-4">
         <div className="glass-panel p-8 rounded-3xl max-w-md w-full border border-destructive/25 space-y-4 text-center shadow-xl">
           <div className="h-14 w-14 bg-destructive/10 border border-destructive/30 rounded-2xl flex items-center justify-center mx-auto text-destructive">
             <AlertCircle className="h-7 w-7" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-xl font-bold text-foreground">Akses Tamu Dinonaktifkan</h3>
-            <p className="text-xs text-muted-foreground leading-relaxed">
+            <h3 data-testid="guest-rejection-title" className="text-xl font-bold text-foreground">Akses Tamu Dinonaktifkan</h3>
+            <p data-testid="guest-rejection-message" className="text-xs text-muted-foreground leading-relaxed">
               Partisipan tamu dinonaktifkan oleh Administrator. Silakan masuk menggunakan akun murid Anda untuk bergabung ke sesi kuis.
             </p>
           </div>
           <button
             id="btn-guest-denied-login"
+            data-testid="btn-guest-denied-login"
             onClick={() => navigate('/login?role=student')}
             className="w-full py-3 bg-primary text-primary-foreground font-black rounded-xl text-xs hover:opacity-90 active:scale-95 transition-all shadow-md"
           >
@@ -842,7 +834,7 @@ export const PlaySession: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-start min-h-[90vh] text-center p-4 py-8 max-w-3xl mx-auto space-y-6">
         {renderConnectionToast()}
-        
+
         {/* Current Student Card */}
         <motion.div
           initial={{ scale: 0.95, opacity: 0 }}
@@ -929,11 +921,10 @@ export const PlaySession: React.FC = () => {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0, scale: 0.85 }}
                       transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-                      className={`glass-panel px-3.5 py-2.5 rounded-2xl border text-center font-bold text-xs flex items-center gap-2 justify-center transition-all ${
-                        isMe
+                      className={`glass-panel px-3.5 py-2.5 rounded-2xl border text-center font-bold text-xs flex items-center gap-2 justify-center transition-all ${isMe
                           ? 'border-primary bg-primary/10 text-primary shadow-sm ring-1 ring-primary/30'
                           : 'text-foreground hover:bg-muted/30'
-                      }`}
+                        }`}
                     >
                       <LazyImage
                         src={`https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(p.display_name)}`}
@@ -1121,11 +1112,11 @@ export const PlaySession: React.FC = () => {
                         {opts.map((opt) => {
                           const chosenMatch = ans?.matching_answers?.[opt.id] || '';
                           const isMatchedCorrect = chosenMatch === opt.match_text;
-                          
+
                           let matchRowStyle = 'border-border/50 bg-background/50';
                           if (showCorrectAnswer && status === 'answered') {
-                            matchRowStyle = isMatchedCorrect 
-                              ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400' 
+                            matchRowStyle = isMatchedCorrect
+                              ? 'border-green-500/30 bg-green-500/5 text-green-700 dark:text-green-400'
                               : 'border-red-500/30 bg-red-500/5 text-red-700 dark:text-red-400';
                           }
 
@@ -1149,9 +1140,9 @@ export const PlaySession: React.FC = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {opts.map((opt) => {
                           const isSelected = ans?.selected_option_id === opt.id || ans?.selected_option_ids?.includes(opt.id);
-                          
+
                           let optStyle = 'border-border/50 bg-background/40 text-muted-foreground';
-                          
+
                           if (showCorrectAnswer) {
                             if (opt.is_correct) {
                               optStyle = 'border-green-500 bg-green-500/10 text-green-700 dark:text-green-400 font-bold';
@@ -1164,9 +1155,8 @@ export const PlaySession: React.FC = () => {
 
                           return (
                             <div key={opt.id} className={`flex items-center gap-3 p-3.5 rounded-2xl border text-xs ${optStyle}`}>
-                              <div className={`h-5 w-5 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${
-                                isSelected ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
-                              }`}>
+                              <div className={`h-5 w-5 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 ${isSelected ? 'bg-primary text-white' : 'bg-muted text-muted-foreground'
+                                }`}>
                                 {isSelected ? '✓' : '•'}
                               </div>
                               <span className="truncate"><LatexRenderer content={opt.option_text} /></span>
@@ -1243,8 +1233,8 @@ export const PlaySession: React.FC = () => {
               <>
                 {/* Hero Stats: Final Score & Accuracy */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div 
-                    data-testid="stat-final-score" 
+                  <div
+                    data-testid="stat-final-score"
                     className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-primary/10 border border-primary/20 text-center"
                   >
                     <span className="text-[10px] uppercase tracking-wider font-extrabold text-primary mb-0.5">
@@ -1255,8 +1245,8 @@ export const PlaySession: React.FC = () => {
                     </span>
                   </div>
 
-                  <div 
-                    data-testid="stat-accuracy" 
+                  <div
+                    data-testid="stat-accuracy"
                     className="flex flex-col items-center justify-center p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-center"
                   >
                     <span className="text-[10px] uppercase tracking-wider font-extrabold text-emerald-600 dark:text-emerald-400 mb-0.5">
@@ -1270,8 +1260,8 @@ export const PlaySession: React.FC = () => {
 
                 {/* 3-Column Breakdown: Benar, Salah, Tidak Dijawab */}
                 <div className="grid grid-cols-3 gap-2">
-                  <div 
-                    data-testid="stat-correct-count" 
+                  <div
+                    data-testid="stat-correct-count"
                     className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-center"
                   >
                     <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 mb-0.5">
@@ -1283,8 +1273,8 @@ export const PlaySession: React.FC = () => {
                     </span>
                   </div>
 
-                  <div 
-                    data-testid="stat-incorrect-count" 
+                  <div
+                    data-testid="stat-incorrect-count"
                     className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-rose-500/5 border border-rose-500/15 text-center"
                   >
                     <div className="flex items-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400 mb-0.5">
@@ -1296,8 +1286,8 @@ export const PlaySession: React.FC = () => {
                     </span>
                   </div>
 
-                  <div 
-                    data-testid="stat-unanswered-count" 
+                  <div
+                    data-testid="stat-unanswered-count"
                     className="flex flex-col items-center justify-center p-2.5 rounded-xl bg-zinc-500/5 border border-zinc-500/15 text-center"
                   >
                     <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-600 dark:text-zinc-400 mb-0.5">
@@ -1371,7 +1361,7 @@ export const PlaySession: React.FC = () => {
               </h3>
               <span className="text-[10px] text-muted-foreground font-semibold">Realtime</span>
             </div>
-            
+
             {loadingLeaderboard ? (
               <div className="py-8 text-center text-xs font-semibold text-muted-foreground animate-pulse">
                 Memuat peringkat peserta...
@@ -1390,15 +1380,14 @@ export const PlaySession: React.FC = () => {
                     'bg-orange-500/10 border-orange-500/20 text-orange-500', // 3rd Bronze
                   ];
                   const medalIcons = ['🥇', '🥈', '🥉'];
-                  
+
                   return (
                     <div
                       key={p.id}
-                      className={`flex items-center justify-between p-3 rounded-xl border transition ${
-                        p.id === participant?.id 
-                          ? 'bg-primary/20 border-primary shadow-sm scale-102 font-black' 
+                      className={`flex items-center justify-between p-3 rounded-xl border transition ${p.id === participant?.id
+                          ? 'bg-primary/20 border-primary shadow-sm scale-102 font-black'
                           : isTop3 ? bgColors[idx] : 'bg-background/40 border-border/50 text-foreground'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-black w-6 text-center">
@@ -1501,7 +1490,7 @@ export const PlaySession: React.FC = () => {
             const isLocked = status === 'answered';
 
             return (
-              <div 
+              <div
                 key={q.id}
                 className={`p-4 rounded-2xl border flex items-center justify-between transition ${statusStyle}`}
               >
@@ -1519,11 +1508,10 @@ export const PlaySession: React.FC = () => {
                     setShowReviewScreen(false);
                     handleProgressQuestion(idx);
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs font-black transition ${
-                    isLocked || isProgressing
-                      ? 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-50' 
+                  className={`px-4 py-2 rounded-xl text-xs font-black transition ${isLocked || isProgressing
+                      ? 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed opacity-50'
                       : 'bg-primary text-primary-foreground hover:scale-102 active:scale-98'
-                  }`}
+                    }`}
                   disabled={isLocked || isProgressing}
                 >
                   {isLocked ? 'Terkunci' : 'Kerjakan'}
@@ -1578,9 +1566,8 @@ export const PlaySession: React.FC = () => {
             <ArrowLeft className="h-4 w-4" />
             Keluar
           </button>
-          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${
-            isCasualMode ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
-          }`}>
+          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase border ${isCasualMode ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-primary/10 text-primary border-primary/20'
+            }`}>
             {isCasualMode ? '🕹️ Casual' : '🎓 Serius'}
           </span>
           {quiz?.anti_cheat_enabled && (
@@ -1599,7 +1586,7 @@ export const PlaySession: React.FC = () => {
         </div>
 
         {/* Timer status */}
-        <div 
+        <div
           id="student-question-timer"
           data-testid="student-question-timer"
           data-timer-value={localTimer}
@@ -1612,7 +1599,7 @@ export const PlaySession: React.FC = () => {
 
       {/* Progress Bar timer */}
       <div className="w-full bg-muted h-2 rounded-full overflow-hidden mb-6">
-        <div 
+        <div
           className="h-full bg-primary transition-all duration-1000 ease-linear"
           style={{ width: `${Math.min(100, Math.max(0, (localTimer / ((currentQuestion?.duration || (currentQuestion as any)?.timer || quiz?.duration_per_question || 30))) * 100))}%` }}
         />
@@ -1693,9 +1680,8 @@ export const PlaySession: React.FC = () => {
                     handleProgressQuestion(idx);
                   }}
                   disabled={isLocked || isProgressing}
-                  className={`h-9 w-9 text-xs rounded-xl flex items-center justify-center border font-bold transition duration-200 outline-none ${btnStyle} ${
-                    (isLocked || isProgressing) ? 'opacity-40 cursor-not-allowed border-dashed' : 'hover:bg-muted active:scale-95'
-                  }`}
+                  className={`h-9 w-9 text-xs rounded-xl flex items-center justify-center border font-bold transition duration-200 outline-none ${btnStyle} ${(isLocked || isProgressing) ? 'opacity-40 cursor-not-allowed border-dashed' : 'hover:bg-muted active:scale-95'
+                    }`}
                   title={`Soal ${idx + 1} (${status})`}
                 >
                   {idx + 1}
@@ -1715,7 +1701,7 @@ export const PlaySession: React.FC = () => {
         {currentQuestion?.media_url && (
           <div className="flex justify-center bg-card/65 rounded-3xl p-4 border max-h-[220px] overflow-hidden">
             {currentQuestion.media_type === 'image' && (
-              <div 
+              <div
                 className="relative group cursor-zoom-in overflow-hidden rounded-xl max-h-[185px]"
                 onClick={() => {
                   setZoomImage(currentQuestion.media_url);
@@ -1723,10 +1709,10 @@ export const PlaySession: React.FC = () => {
                   setZoomResetKey(prev => prev + 1);
                 }}
               >
-                <LazyImage 
-                  src={currentQuestion.media_url} 
-                  alt="soal" 
-                  className="max-h-[185px] object-contain rounded-xl group-hover:scale-[1.02] transition-transform duration-300" 
+                <LazyImage
+                  src={currentQuestion.media_url}
+                  alt="soal"
+                  className="max-h-[185px] object-contain rounded-xl group-hover:scale-[1.02] transition-transform duration-300"
                 />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-300">
                   <span className="text-white text-[10px] font-bold bg-zinc-900/80 px-2.5 py-1.5 rounded-full border border-white/10 backdrop-blur-sm">
@@ -1753,7 +1739,7 @@ export const PlaySession: React.FC = () => {
             )}
           </div>
         )}
-        
+
         {/* Legacy Mode: Waiting for host message overlay */}
         {!isSelfPaced && hasAnswered && localTimer > 0 && (
           <motion.div
@@ -1783,23 +1769,21 @@ export const PlaySession: React.FC = () => {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
-              className={`fixed inset-x-4 bottom-4 md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md glass-panel p-6 rounded-3xl shadow-2xl border-2 flex flex-col gap-4 z-50 ${
-                quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
+              className={`fixed inset-x-4 bottom-4 md:inset-x-auto md:right-4 md:bottom-4 md:max-w-md glass-panel p-6 rounded-3xl shadow-2xl border-2 flex flex-col gap-4 z-50 ${quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
                   ? (isTimeoutQuestion
-                      ? 'border-amber-500 bg-amber-500/10 backdrop-blur-md'
-                      : isAnswerCorrect
+                    ? 'border-amber-500 bg-amber-500/10 backdrop-blur-md'
+                    : isAnswerCorrect
                       ? 'border-green-500 bg-green-50/15 backdrop-blur-md'
                       : 'border-red-500 bg-red-50/15 backdrop-blur-md')
                   : 'border-primary bg-primary/10 backdrop-blur-md'
-              }`}
+                }`}
             >
               {/* Top Row */}
               <div className="flex items-center gap-4">
-                <div className={`h-12 w-12 rounded-full flex items-center justify-center shrink-0 text-white font-black shadow-lg ${
-                  quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
+                <div className={`h-12 w-12 rounded-full flex items-center justify-center shrink-0 text-white font-black shadow-lg ${quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
                     ? (isTimeoutQuestion ? 'bg-amber-500' : isAnswerCorrect ? 'bg-green-600' : 'bg-red-600')
                     : 'bg-primary'
-                }`}>
+                  }`}>
                   {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
                     ? (isTimeoutQuestion ? <Clock className="h-6 w-6" /> : isAnswerCorrect ? <Check className="h-6 w-6" /> : <X className="h-6 w-6" />)
                     : <Check className="h-6 w-6" />
@@ -1815,9 +1799,9 @@ export const PlaySession: React.FC = () => {
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {quiz?.show_question_result !== false && quiz?.show_correct_answer !== false
                       ? (isTimeoutQuestion
-                          ? 'Waktu pengerjaan telah habis sebelum Anda mengirim jawaban.'
-                          : isAnswerCorrect 
-                          ? (quiz?.show_score_per_question !== false ? `Anda mendapatkan +${scoreAwarded} Poin!` : 'Jawaban Anda tepat!') 
+                        ? 'Waktu pengerjaan telah habis sebelum Anda mengirim jawaban.'
+                        : isAnswerCorrect
+                          ? (quiz?.show_score_per_question !== false ? `Anda mendapatkan +${scoreAwarded} Poin!` : 'Jawaban Anda tepat!')
                           : 'Tetap semangat, coba lagi di soal berikutnya!')
                       : (quiz?.show_score_per_question !== false && isAnswerCorrect && scoreAwarded > 0
                         ? `Anda mendapatkan +${scoreAwarded} Poin!`
@@ -1826,129 +1810,129 @@ export const PlaySession: React.FC = () => {
                   </p>
                   {isCasualMode && !isTimeoutQuestion && (quiz?.show_question_result !== false && quiz?.show_correct_answer !== false) && !isAnswerCorrect && (
                     <p className="text-[10px] text-red-500 font-extrabold mt-1">
-                      {isOutOfLives 
+                      {isOutOfLives
                         ? '💔 Nyawa Anda telah habis! Anda tidak dapat menjawab soal lagi.'
                         : `💔 Kehilangan 1 Nyawa! Sisa Nyawa: ${currentLives}`
                       }
                     </p>
                   )}
                 </div>
-              {isSelfPaced && (
-                <button
-                  type="button"
-                  disabled={isProgressing}
-                  onClick={async () => {
-                    setShowFeedback(false);
-                    setShowExplanationPanel(false);
-                    setShowStatsPanel(false);
-                    if (currentQuestionIndex + 1 < questions.length) {
-                      await handleProgressQuestion(currentQuestionIndex + 1);
-                    } else {
-                      setShowReviewScreen(true);
-                    }
-                  }}
-                  className="px-4 py-2.5 text-xs font-black rounded-xl bg-foreground text-background shadow hover:opacity-90 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                >
-                  {isProgressing ? (
-                    <>
-                      <span className="h-3.5 w-3.5 border-2 border-background border-t-transparent rounded-full animate-spin" />
-                      Memuat...
-                    </>
-                  ) : (
-                    'Lanjut'
-                  )}
-                </button>
-              )}
-            </div>
-
-            {/* Explanation Accordion */}
-            {quiz?.show_explanation && currentQuestion?.explanation && (
-              <div className="border-t border-border/60 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowExplanationPanel(!showExplanationPanel)}
-                  className="flex items-center justify-between w-full text-xs font-bold text-muted-foreground hover:text-foreground transition outline-none"
-                >
-                  <span className="flex items-center gap-1.5">
-                    💡 Pembahasan Soal
-                  </span>
-                  <span>{showExplanationPanel ? '▲ Sembunyikan' : '▼ Tampilkan'}</span>
-                </button>
-                
-                <AnimatePresence>
-                  {showExplanationPanel && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden mt-2"
-                    >
-                      <div className="bg-muted/50 border border-border/40 p-3 rounded-2xl text-xs text-foreground font-medium leading-relaxed italic max-h-32 overflow-y-auto">
-                        <LatexRenderer content={currentQuestion.explanation} />
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {isSelfPaced && (
+                  <button
+                    type="button"
+                    disabled={isProgressing}
+                    onClick={async () => {
+                      setShowFeedback(false);
+                      setShowExplanationPanel(false);
+                      setShowStatsPanel(false);
+                      if (currentQuestionIndex + 1 < questions.length) {
+                        await handleProgressQuestion(currentQuestionIndex + 1);
+                      } else {
+                        setShowReviewScreen(true);
+                      }
+                    }}
+                    className="px-4 py-2.5 text-xs font-black rounded-xl bg-foreground text-background shadow hover:opacity-90 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                  >
+                    {isProgressing ? (
+                      <>
+                        <span className="h-3.5 w-3.5 border-2 border-background border-t-transparent rounded-full animate-spin" />
+                        Memuat...
+                      </>
+                    ) : (
+                      'Lanjut'
+                    )}
+                  </button>
+                )}
               </div>
-            )}
 
-            {/* Stats Accordion */}
-            {quiz?.show_question_statistics && (
-              <div className="border-t border-border/60 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowStatsPanel(!showStatsPanel)}
-                  className="flex items-center justify-between w-full text-xs font-bold text-muted-foreground hover:text-foreground transition outline-none"
-                >
-                  <span className="flex items-center gap-1.5">
-                    📊 Statistik Peserta Lain
-                  </span>
-                  <span>{showStatsPanel ? '▲ Sembunyikan' : '▼ Tampilkan'}</span>
-                </button>
+              {/* Explanation Accordion */}
+              {quiz?.show_explanation && currentQuestion?.explanation && (
+                <div className="border-t border-border/60 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowExplanationPanel(!showExplanationPanel)}
+                    className="flex items-center justify-between w-full text-xs font-bold text-muted-foreground hover:text-foreground transition outline-none"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      💡 Pembahasan Soal
+                    </span>
+                    <span>{showExplanationPanel ? '▲ Sembunyikan' : '▼ Tampilkan'}</span>
+                  </button>
 
-                <AnimatePresence>
-                  {showStatsPanel && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: 'auto', opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      className="overflow-hidden mt-2"
-                    >
-                      {loadingStats ? (
-                        <p className="text-[10px] text-muted-foreground animate-pulse text-center py-2 font-medium">Memuat statistik...</p>
-                      ) : questionStats && questionStats.totalCount > 0 ? (
-                        <div className="space-y-2.5 p-3 rounded-2xl bg-muted/40 border border-border/40 text-[11px] font-semibold">
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-green-600 dark:text-green-400">Jawaban Benar</span>
-                              <span>{Math.round((questionStats.correctCount / questionStats.totalCount) * 100)}% ({questionStats.correctCount} murid)</span>
-                            </div>
-                            <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
-                              <div className="bg-green-500 h-full rounded-full" style={{ width: `${(questionStats.correctCount / questionStats.totalCount) * 100}%` }} />
-                            </div>
-                          </div>
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-red-500">Jawaban Salah</span>
-                              <span>{Math.round((questionStats.incorrectCount / questionStats.totalCount) * 100)}% ({questionStats.incorrectCount} murid)</span>
-                            </div>
-                            <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
-                              <div className="bg-red-500 h-full rounded-full" style={{ width: `${(questionStats.incorrectCount / questionStats.totalCount) * 100}%` }} />
-                            </div>
-                          </div>
-                          <p className="text-[9px] text-muted-foreground text-center font-medium mt-1">Total kontribusi respon: {questionStats.totalCount} peserta</p>
+                  <AnimatePresence>
+                    {showExplanationPanel && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden mt-2"
+                      >
+                        <div className="bg-muted/50 border border-border/40 p-3 rounded-2xl text-xs text-foreground font-medium leading-relaxed italic max-h-32 overflow-y-auto">
+                          <LatexRenderer content={currentQuestion.explanation} />
                         </div>
-                      ) : (
-                        <p className="text-[10px] text-muted-foreground text-center py-2 font-medium">Belum ada statistik respons untuk soal ini.</p>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            )}
-          </motion.div>
-        );
-      })()}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {/* Stats Accordion */}
+              {quiz?.show_question_statistics && (
+                <div className="border-t border-border/60 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowStatsPanel(!showStatsPanel)}
+                    className="flex items-center justify-between w-full text-xs font-bold text-muted-foreground hover:text-foreground transition outline-none"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      📊 Statistik Peserta Lain
+                    </span>
+                    <span>{showStatsPanel ? '▲ Sembunyikan' : '▼ Tampilkan'}</span>
+                  </button>
+
+                  <AnimatePresence>
+                    {showStatsPanel && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden mt-2"
+                      >
+                        {loadingStats ? (
+                          <p className="text-[10px] text-muted-foreground animate-pulse text-center py-2 font-medium">Memuat statistik...</p>
+                        ) : questionStats && questionStats.totalCount > 0 ? (
+                          <div className="space-y-2.5 p-3 rounded-2xl bg-muted/40 border border-border/40 text-[11px] font-semibold">
+                            <div>
+                              <div className="flex justify-between mb-1">
+                                <span className="text-green-600 dark:text-green-400">Jawaban Benar</span>
+                                <span>{Math.round((questionStats.correctCount / questionStats.totalCount) * 100)}% ({questionStats.correctCount} murid)</span>
+                              </div>
+                              <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                                <div className="bg-green-500 h-full rounded-full" style={{ width: `${(questionStats.correctCount / questionStats.totalCount) * 100}%` }} />
+                              </div>
+                            </div>
+                            <div>
+                              <div className="flex justify-between mb-1">
+                                <span className="text-red-500">Jawaban Salah</span>
+                                <span>{Math.round((questionStats.incorrectCount / questionStats.totalCount) * 100)}% ({questionStats.incorrectCount} murid)</span>
+                              </div>
+                              <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                                <div className="bg-red-500 h-full rounded-full" style={{ width: `${(questionStats.incorrectCount / questionStats.totalCount) * 100}%` }} />
+                              </div>
+                            </div>
+                            <p className="text-[9px] text-muted-foreground text-center font-medium mt-1">Total kontribusi respon: {questionStats.totalCount} peserta</p>
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-muted-foreground text-center py-2 font-medium">Belum ada statistik respons untuk soal ini.</p>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* Answer selection pad layout */}
@@ -1961,8 +1945,8 @@ export const PlaySession: React.FC = () => {
               const shouldHighlight = hasAnswered || localTimer <= 0;
               const isTrue = opt.option_text.toLowerCase() === 'benar' || opt.option_text.toLowerCase() === 'true';
 
-              let buttonColor = isTrue 
-                ? 'bg-blue-600 hover:bg-blue-700' 
+              let buttonColor = isTrue
+                ? 'bg-blue-600 hover:bg-blue-700'
                 : 'bg-red-600 hover:bg-red-700';
 
               const showCorrectAnswer = quiz?.show_correct_answer !== false;
@@ -1994,9 +1978,8 @@ export const PlaySession: React.FC = () => {
                     }
                   }}
                   disabled={isDisabled}
-                  className={`rounded-3xl p-8 text-white font-black text-xl flex flex-col items-center justify-center gap-4 transition duration-300 border-2 border-transparent outline-none shadow-md ${
-                    buttonColor
-                  } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]' : ''}`}
+                  className={`rounded-3xl p-8 text-white font-black text-xl flex flex-col items-center justify-center gap-4 transition duration-300 border-2 border-transparent outline-none shadow-md ${buttonColor
+                    } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]' : ''}`}
                 >
                   <div className="text-4xl">{isTrue ? '👍' : '👎'}</div>
                   <div className="text-lg uppercase tracking-wider">{opt.option_text}</div>
@@ -2036,9 +2019,8 @@ export const PlaySession: React.FC = () => {
                     type="button"
                     onClick={() => handleToggleMultipleOption(opt.id)}
                     disabled={isDisabled}
-                    className={`rounded-2xl p-5 text-white font-black text-lg flex items-center justify-between transition duration-200 outline-none border border-transparent ${
-                      buttonColor
-                    } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.01] hover:shadow-md' : ''}`}
+                    className={`rounded-2xl p-5 text-white font-black text-lg flex items-center justify-between transition duration-200 outline-none border border-transparent ${buttonColor
+                      } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.01] hover:shadow-md' : ''}`}
                   >
                     <div className="flex items-center gap-4 truncate">
                       <div className="h-10 w-10 shrink-0 bg-white/20 rounded-xl flex items-center justify-center text-sm font-black">
@@ -2050,9 +2032,8 @@ export const PlaySession: React.FC = () => {
                     </div>
 
                     {!shouldHighlight && (
-                      <div className={`h-6 w-6 rounded-lg border-2 flex items-center justify-center transition ${
-                        isSelected ? 'bg-white text-primary border-white' : 'border-white/40'
-                      }`}>
+                      <div className={`h-6 w-6 rounded-lg border-2 flex items-center justify-center transition ${isSelected ? 'bg-white text-primary border-white' : 'border-white/40'
+                        }`}>
                         {isSelected && <Check className="h-4 w-4 stroke-[3]" />}
                       </div>
                     )}
@@ -2080,13 +2061,13 @@ export const PlaySession: React.FC = () => {
                 const shouldHighlight = hasAnswered || localTimer <= 0;
                 const matchedValue = matchingAnswers[opt.id] || '';
                 const isMatchedCorrect = matchedValue === opt.match_text;
-                
+
                 let rowStyle = 'border-border';
                 const showCorrectAnswer = quiz?.show_correct_answer !== false;
                 if (shouldHighlight) {
                   if (showCorrectAnswer) {
-                    rowStyle = isMatchedCorrect 
-                      ? 'border-green-500 bg-green-500/10 text-green-700 dark:text-green-400' 
+                    rowStyle = isMatchedCorrect
+                      ? 'border-green-500 bg-green-500/10 text-green-700 dark:text-green-400'
                       : 'border-red-500 bg-red-500/10 text-red-700 dark:text-red-400';
                   } else {
                     rowStyle = 'border-primary bg-primary/5';
@@ -2094,7 +2075,7 @@ export const PlaySession: React.FC = () => {
                 }
 
                 return (
-                  <div 
+                  <div
                     key={opt.id}
                     className={`flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3 rounded-2xl border bg-background/50 justify-between transition ${rowStyle}`}
                   >
@@ -2108,7 +2089,7 @@ export const PlaySession: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <span className="text-muted-foreground text-xs hidden sm:inline">pasangannya</span>
                       <span className="text-muted-foreground text-xs sm:hidden text-center block mb-1">Pasangannya:</span>
-                      
+
                       {isDisabled ? (
                         <div className="px-4 py-2 bg-muted rounded-xl border font-bold text-xs">
                           {matchedValue || '(Belum dipasangkan)'}
@@ -2192,9 +2173,8 @@ export const PlaySession: React.FC = () => {
                     }
                   }}
                   disabled={isDisabled}
-                  className={`rounded-2xl p-5 text-white font-black text-lg flex items-center gap-4 transition duration-200 outline-none ${
-                    buttonColor
-                  } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.01] hover:shadow-md' : ''}`}
+                  className={`rounded-2xl p-5 text-white font-black text-lg flex items-center gap-4 transition duration-200 outline-none ${buttonColor
+                    } ${isDisabled && !shouldHighlight ? 'opacity-65 cursor-not-allowed' : ''} ${!isDisabled ? 'hover:scale-[1.01] hover:shadow-md' : ''}`}
                 >
                   <div className="h-10 w-10 shrink-0 bg-white/20 rounded-xl flex items-center justify-center text-sm font-black">
                     {shapes[idx % 4]}
@@ -2223,14 +2203,14 @@ export const PlaySession: React.FC = () => {
             ) : (
               <div className="opacity-0 pointer-events-none" /> /* Filler block */
             )}
-            
+
             <button
               type="button"
               onClick={handleSelfPacedSubmit}
               disabled={
                 isOutOfLives || (
-                  currentQuestion.question_type === 'matching' 
-                    ? currentOptions.some(o => !matchingAnswers[o.id]) 
+                  currentQuestion.question_type === 'matching'
+                    ? currentOptions.some(o => !matchingAnswers[o.id])
                     : selectedOptionIds.length === 0
                 )
               }
@@ -2293,7 +2273,7 @@ export const PlaySession: React.FC = () => {
             </button>
 
             {/* Image Container */}
-            <div 
+            <div
               className="relative w-full h-full max-w-4xl max-h-[80vh] flex items-center justify-center p-4 overflow-hidden"
               onClick={(e) => e.stopPropagation()}
               onWheel={(e) => {
@@ -2322,7 +2302,7 @@ export const PlaySession: React.FC = () => {
             </div>
 
             {/* Zoom Control Bar */}
-            <div 
+            <div
               className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-zinc-900/95 text-white border border-zinc-800 backdrop-blur-md rounded-2xl px-5 py-3 shadow-2xl z-50"
               onClick={(e) => e.stopPropagation()}
             >
@@ -2354,7 +2334,7 @@ export const PlaySession: React.FC = () => {
               >
                 Reset
               </button>
-</div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2408,7 +2388,7 @@ export const PlaySession: React.FC = () => {
             <div className="h-16 w-16 bg-red-500/10 border border-red-500/30 rounded-full flex items-center justify-center mx-auto text-red-500 animate-pulse">
               <Eye className="h-8 w-8" />
             </div>
-            
+
             <div className="space-y-2">
               <h2 className="text-xl font-black text-white uppercase tracking-tight">Mode Ujian Aman Aktif</h2>
               <p className="text-xs text-zinc-400 font-semibold leading-relaxed">
@@ -2468,9 +2448,8 @@ export const PlaySession: React.FC = () => {
               </div>
               <div className="flex justify-between">
                 <span>Sess Status:</span>
-                <span className={`font-bold ${
-                  session?.status === 'active' ? 'text-green-500' : 'text-amber-500'
-                }`}>
+                <span className={`font-bold ${session?.status === 'active' ? 'text-green-500' : 'text-amber-500'
+                  }`}>
                   {session?.status || 'null'}
                 </span>
               </div>

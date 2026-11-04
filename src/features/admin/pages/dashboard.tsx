@@ -1883,7 +1883,8 @@ export const AdminDashboard: React.FC = () => {
                           <div className="flex gap-3">
                             <button
                               type="button"
-                              onClick={() => setSettings({ ...settings, registration_enabled: 'true', allow_student_registration: 'true' })}
+                              data-testid="btn-registration-enable"
+                              onClick={() => setSettings({ ...settings, registration_enabled: 'true', allow_registration: 'true', allow_student_registration: 'true' })}
                               className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
                                 settings.registration_enabled === 'true' 
                                   ? 'border-primary bg-primary/10 text-primary' 
@@ -1894,7 +1895,8 @@ export const AdminDashboard: React.FC = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => setSettings({ ...settings, registration_enabled: 'false', allow_student_registration: 'false' })}
+                              data-testid="btn-registration-disable"
+                              onClick={() => setSettings({ ...settings, registration_enabled: 'false', allow_registration: 'false', allow_student_registration: 'false' })}
                               className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
                                 settings.registration_enabled === 'false' 
                                   ? 'border-red-500/50 bg-red-500/10 text-red-500' 
@@ -1911,6 +1913,7 @@ export const AdminDashboard: React.FC = () => {
                           <div className="flex gap-3">
                             <button
                               type="button"
+                              data-testid="btn-guest-enable"
                               onClick={() => setSettings({ ...settings, allow_guest_participants: 'true' })}
                               className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
                                 settings.allow_guest_participants === 'true' 
@@ -1922,6 +1925,7 @@ export const AdminDashboard: React.FC = () => {
                             </button>
                             <button
                               type="button"
+                              data-testid="btn-guest-disable"
                               onClick={() => setSettings({ ...settings, allow_guest_participants: 'false' })}
                               className={`flex-1 py-2.5 rounded-2xl border text-xs font-bold transition ${
                                 settings.allow_guest_participants === 'false' 
