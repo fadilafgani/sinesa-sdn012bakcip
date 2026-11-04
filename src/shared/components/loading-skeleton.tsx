@@ -1,7 +1,9 @@
 import React from 'react';
 import { motion } from 'framer-motion';
+import { useSettingsStore } from '@/features/settings';
 
 export const LoadingSkeleton: React.FC = () => {
+  const appName = useSettingsStore(s => s.settings.app_name) || 'SINESA';
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center bg-mesh p-6">
       <div className="w-full max-w-md space-y-6">
@@ -51,7 +53,7 @@ export const LoadingSkeleton: React.FC = () => {
         
         {/* Subtitle */}
         <p className="text-center text-xs text-muted-foreground animate-pulse">
-          Menyiapkan modul SINESA...
+          Menyiapkan modul {appName}...
         </p>
       </div>
     </div>

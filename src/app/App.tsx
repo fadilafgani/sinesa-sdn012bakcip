@@ -1,6 +1,7 @@
 import { useEffect, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
+import { useSettingsStore } from '@/features/settings';
 import { Login } from '@/features/auth/pages/login';
 import { ProtectedRoute } from '@/app/router/protected-route';
 import { LoadingSkeleton } from '@/shared/components/loading-skeleton';
@@ -38,6 +39,7 @@ function App() {
 
   useEffect(() => {
     initialize();
+    useSettingsStore.getState().fetchSettings();
   }, [initialize]);
 
   useEffect(() => {

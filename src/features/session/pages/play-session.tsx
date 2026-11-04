@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { showConfirm, showError } from '@/shared/utils/swal';
+import { useSettingsStore } from '@/features/settings';
 import { sessionActions } from '@/features/session/stores/session-actions';
 import { QuestionService } from '@/features/question/services/question.service';
 import { SettingsService } from '@/features/settings/services/settings.service';
@@ -35,6 +36,7 @@ import { getSafeMediaUrl } from '@/shared/utils/media';
 export const PlaySession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const { profile, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, isMock: state.isMock })));
+  const settings = useSettingsStore(s => s.settings);
   const pin = searchParams.get('pin');
   const name = searchParams.get('name');
 
@@ -638,7 +640,7 @@ export const PlaySession: React.FC = () => {
             <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary mx-auto mb-2">
               <span className="text-2xl">🎮</span>
             </div>
-            <h2 className="text-xl font-black text-foreground">Gabung Kuis SINESA</h2>
+            <h2 className="text-xl font-black text-foreground">Gabung Kuis {settings.app_name || 'SINESA'}</h2>
             <p className="text-xs text-muted-foreground font-medium">
               Masukkan PIN Kuis dari guru dan nama tampilan Anda untuk langsung bergabung ke room kuis.
             </p>
@@ -743,7 +745,7 @@ export const PlaySession: React.FC = () => {
       <div className="flex h-screen items-center justify-center bg-mesh">
         <div className="text-center space-y-4">
           <div className="h-10 w-10 animate-spin border-4 border-primary border-t-transparent rounded-full mx-auto" />
-          <p className="text-sm text-muted-foreground font-semibold">Menghubungkan ke server kuis SINESA...</p>
+          <p className="text-sm text-muted-foreground font-semibold">Menghubungkan ke server kuis {settings.app_name || 'SINESA'}...</p>
         </div>
       </div>
     );
@@ -2377,7 +2379,7 @@ export const PlaySession: React.FC = () => {
                   Penyebab: "{warningReason}"
                 </p>
                 <p className="text-xs text-muted-foreground font-semibold leading-relaxed mt-2">
-                  Anda terdeteksi melakukan tindakan di luar sistem kuis SINESA.
+                  Anda terdeteksi melakukan tindakan di luar sistem kuis {settings.app_name || 'SINESA'}.
                 </p>
               </div>
 
@@ -2437,7 +2439,7 @@ export const PlaySession: React.FC = () => {
         ) : (
           <div className="bg-zinc-950 text-zinc-350 rounded-2xl border border-zinc-850 p-4 w-72 shadow-2xl text-[11px] space-y-3 font-mono">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <span className="font-bold text-white text-xs">SINESA Player Diagnostik</span>
+              <span className="font-bold text-white text-xs">{settings.app_name || 'SINESA'} Player Diagnostik</span>
               <button
                 onClick={() => setShowDiagnostics(false)}
                 className="text-zinc-500 hover:text-white"

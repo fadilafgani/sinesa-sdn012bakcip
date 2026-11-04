@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/stores/auth-store';
 import { AuthService } from '@/features/auth/services/auth.service';
-import { SettingsService } from '@/features/settings/services/settings.service';
+import { useSettingsStore } from '@/features/settings';
 import { apiClient } from '@/core/api-client';
 import type { UserRole } from '@/types';
 import { motion } from 'framer-motion';
@@ -17,6 +17,7 @@ import { useUiStore } from '@/shared/stores/ui-store';
 export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { isMock, loginMock, user, profile } = useAuthStore();
+  const settings = useSettingsStore(s => s.settings);
 
   const [authTab, setAuthTab] = useState<'login' | 'register' | 'guest'>('login');
   const isSignUp = authTab === 'register';
@@ -81,38 +82,15 @@ export const Login: React.FC = () => {
     setDeferredPrompt(null);
   };
 
-  // Check if self-registration and guest access are enabled from DB or mock settings
+  // Load system settings and synchronize access settings
   useEffect(() => {
-    const checkRegistrationSetting = async () => {
-      if (isMock) {
-        try {
-          const savedSettings = JSON.parse(localStorage.getItem('mock_system_settings') || '{}');
-          setRegistrationEnabled(savedSettings.registration_enabled !== 'false');
-          setAllowGuestParticipants(savedSettings.allow_guest_participants !== 'false');
-        } catch (e) {
-          setRegistrationEnabled(true);
-          setAllowGuestParticipants(true);
-        }
-      } else {
-        try {
-          const res = await SettingsService.getSystemSettings();
-          if (res.success && res.data) {
-            const regSetting = res.data.find(s => s.key === 'registration_enabled');
-            setRegistrationEnabled(!regSetting || regSetting.value !== 'false');
-            const guestSetting = res.data.find(s => s.key === 'allow_guest_participants');
-            setAllowGuestParticipants(!guestSetting || guestSetting.value !== 'false');
-          } else {
-            setRegistrationEnabled(true);
-            setAllowGuestParticipants(true);
-          }
-        } catch (e) {
-          setRegistrationEnabled(true);
-          setAllowGuestParticipants(true);
-        }
-      }
-    };
-    checkRegistrationSetting();
+    useSettingsStore.getState().fetchSettings();
   }, [isMock]);
+
+  useEffect(() => {
+    setRegistrationEnabled(settings.registration_enabled !== 'false' && settings.allow_student_registration !== 'false');
+    setAllowGuestParticipants(settings.allow_guest_participants !== 'false');
+  }, [settings.registration_enabled, settings.allow_student_registration, settings.allow_guest_participants]);
 
   // Pre-fill credentials if provided in query params (useful for automated testing)
   useEffect(() => {
@@ -345,7 +323,7 @@ export const Login: React.FC = () => {
                 <Download className="h-5 w-5" />
               </div>
               <div>
-                <p className="font-bold text-xs text-foreground">Pasang Aplikasi SINESA</p>
+                <p className="font-bold text-xs text-foreground">Pasang Aplikasi {settings.app_name || 'SINESA'}</p>
                 <p className="text-[10px] leading-snug text-muted-foreground mt-0.5">
                   {isIOSDevice 
                     ? "Tekan tombol 'Bagikan' (Share) lalu 'Tambahkan ke Layar Utama' di Safari." 
@@ -378,21 +356,37 @@ export const Login: React.FC = () => {
             initial={{ scale: 0.8 }}
             animate={{ scale: 1 }}
             transition={{ type: "spring", stiffness: 200, damping: 15 }}
-            className="inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-primary-foreground shadow-lg shadow-primary/10 mb-4 p-2"
+            className="inline-flex h-20 w-20 items-center justify-center rounded-3xl bg-white text-primary-foreground shadow-lg shadow-primary/10 mb-4 p-2 overflow-hidden border border-border/50"
           >
             <img 
-              src="/logo-sdn012.png" 
-              alt="Logo SDN 012 Babakan Ciparay"
+              data-testid="brand-logo"
+              src={settings.app_logo || '/logo-sdn012.png'} 
+              alt={`Logo ${settings.school_name || 'Sekolah'}`}
               className="h-16 w-16 object-contain"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/logo-sdn012.png';
+              }}
             />
           </motion.div>
-          <h1 className="text-3xl font-extrabold tracking-tight text-foreground">
-            SINESA
+          <h1 data-testid="brand-app-name" className="text-3xl font-extrabold tracking-tight text-foreground">
+            {settings.app_name || 'SINESA'}
           </h1>
-          <p className="mt-1.5 text-sm text-muted-foreground font-medium flex flex-col items-center">
-            <span>Sistem Nilai Dan Evaluasi Siswa Aktif</span>
-            <span className="text-xs font-bold text-primary mt-1">SDN 012 Babakan Ciparay</span>
-          </p>
+          <div className="mt-1.5 text-sm text-muted-foreground font-medium flex flex-col items-center">
+            <span>{settings.app_title || 'Sistem Nilai Dan Evaluasi Siswa Aktif'}</span>
+            <span data-testid="brand-school-name" className="text-xs font-bold text-primary mt-1">
+              {settings.school_name || 'SDN 012 Babakan Ciparay'}
+              {settings.school_npsn ? (
+                <span data-testid="brand-school-npsn" className="ml-1 text-muted-foreground font-normal">
+                  (NPSN: {settings.school_npsn})
+                </span>
+              ) : null}
+            </span>
+            {settings.school_address && (
+              <span data-testid="brand-school-address" className="text-[11px] text-muted-foreground mt-0.5 text-center max-w-sm">
+                {settings.school_address}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Auth Box glass container */}

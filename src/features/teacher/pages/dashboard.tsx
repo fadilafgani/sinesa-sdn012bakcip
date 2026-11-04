@@ -8,9 +8,11 @@ import { Plus, Edit2, Play, BarChart2, Trash2, LogOut, BookOpen, Clock, Layers, 
 import { apiClient } from '@/core/api-client';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { showConfirm, showError, showSuccess } from '@/shared/utils/swal';
+import { useSettingsStore } from '@/features/settings';
 
 export const TeacherDashboard: React.FC = () => {
   const { profile, signOut, isMock } = useAuthStore();
+  const settings = useSettingsStore(s => s.settings);
   const navigate = useNavigate();
   const location = useLocation();
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
@@ -261,14 +263,20 @@ export const TeacherDashboard: React.FC = () => {
         <div className="flex items-center justify-between mb-8 border-b pb-5">
           <div className="flex items-center gap-3">
             <img 
-              src="/logo-sdn012.png" 
-              alt="Logo SDN 012 Babakan Ciparay"
+              data-testid="teacher-brand-logo"
+              src={settings.app_logo || '/logo-sdn012.png'} 
+              alt={`Logo ${settings.school_name || 'Sekolah'}`}
               className="h-10 w-10 object-contain rounded-2xl bg-white p-1 shadow shadow-primary/10 border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/logo-sdn012.png';
+              }}
             />
             <div>
-              <h1 className="text-xl font-bold text-foreground">SINESA Guru</h1>
+              <h1 data-testid="teacher-brand-name" className="text-xl font-bold text-foreground">
+                {settings.app_name || 'SINESA'} Guru
+              </h1>
               <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                Dashboard Pembelajaran
+                {settings.school_name || 'Dashboard Pembelajaran'}
               </p>
             </div>
           </div>

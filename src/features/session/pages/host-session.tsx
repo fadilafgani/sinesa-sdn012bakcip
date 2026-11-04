@@ -28,6 +28,7 @@ import { getSafeMediaUrl } from '@/shared/utils/media';
 import { LeaderboardService } from '@/features/leaderboard/services/leaderboard.service';
 import { useLeaderboardStore } from '@/features/leaderboard/stores/leaderboard-store';
 import { useParticipantStore } from '@/features/participant/stores/participant-store';
+import { useSettingsStore } from '@/features/settings';
 
 export type HostPageState = 'loading' | 'success' | 'access_denied' | 'not_found' | 'error';
 
@@ -43,6 +44,7 @@ export const HostSession: React.FC = () => {
   const targetId = rawId ? rawId.trim() : '';
 
   const { isMock, profile } = useAuthStore(useShallow(state => ({ isMock: state.isMock, profile: state.profile })));
+  const settings = useSettingsStore(s => s.settings);
   const { navigate } = useNavigation();
   const {
     activeSession,
@@ -1261,7 +1263,7 @@ export const HostSession: React.FC = () => {
       {renderConnectionToast()}
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between border-b pb-4 mb-6">
-          <h1 className="text-lg font-black text-foreground">SINESA Live Host</h1>
+          <h1 className="text-lg font-black text-foreground">{settings.app_name || 'SINESA'} Live Host</h1>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <button
@@ -1400,7 +1402,7 @@ export const HostSession: React.FC = () => {
         ) : (
           <div className="bg-zinc-950 text-zinc-350 rounded-2xl border border-zinc-850 p-4 w-72 shadow-2xl text-[11px] space-y-3 font-mono">
             <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <span className="font-bold text-white text-xs">SINESA Host Diagnostik</span>
+              <span className="font-bold text-white text-xs">{settings.app_name || 'SINESA'} Host Diagnostik</span>
               <button
                 onClick={() => setShowDiagnostics(false)}
                 className="text-zinc-500 hover:text-white"

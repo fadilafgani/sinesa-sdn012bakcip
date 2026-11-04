@@ -8,6 +8,7 @@ import { AnswerService } from '@/features/answer/services/answer.service';
 import { ParticipantService } from '@/features/participant/services/participant.service';
 import { ThemeToggle } from '@/shared/components/theme-toggle';
 import { getSafeMediaUrl } from '@/shared/utils/media';
+import { useSettingsStore } from '@/features/settings';
 import { 
   LogOut, 
   ArrowRight, 
@@ -31,6 +32,7 @@ import { LazyImage } from '@/shared/components/lazy-image';
 
 export const StudentDashboard: React.FC = () => {
   const { profile, signOut, isMock } = useAuthStore(useShallow(state => ({ profile: state.profile, signOut: state.signOut, isMock: state.isMock })));
+  const settings = useSettingsStore(s => s.settings);
   const { joinSession, error: joinError, loading: joining } = usePlayStore(useShallow(state => ({ joinSession: state.joinSession, error: state.error, loading: state.loading })));
   const navigate = useNavigate();
   const location = useLocation();
@@ -327,14 +329,20 @@ export const StudentDashboard: React.FC = () => {
         <div className="flex items-center justify-between border-b pb-5">
           <div className="flex items-center gap-3">
             <img 
-              src="/logo-sdn012.png" 
-              alt="Logo SDN 012 Babakan Ciparay"
+              data-testid="student-brand-logo"
+              src={settings.app_logo || '/logo-sdn012.png'} 
+              alt={`Logo ${settings.school_name || 'Sekolah'}`}
               className="h-10 w-10 object-contain rounded-2xl bg-white p-1 shadow shadow-primary/10 border"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/logo-sdn012.png';
+              }}
             />
             <div>
-              <h1 className="text-xl font-bold text-foreground">SINESA Siswa</h1>
+              <h1 data-testid="student-brand-name" className="text-xl font-bold text-foreground">
+                {settings.app_name || 'SINESA'} Siswa
+              </h1>
               <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-                Portal Evaluasi Belajar
+                {settings.school_name ? `Portal Evaluasi • ${settings.school_name}` : 'Portal Evaluasi Belajar'}
               </p>
             </div>
           </div>

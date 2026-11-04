@@ -37,6 +37,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from 
 import { LazyImage } from '@/shared/components/lazy-image';
 import { mediaStorageService } from '@/shared/services/media-storage';
 import { useAdminStore } from '@/features/admin/stores/admin-store';
+import { useSettingsStore } from '@/features/settings';
 
 export const AdminDashboard: React.FC = () => {
   const { signOut, isMock, profile: adminProfile } = useAuthStore();
@@ -58,20 +59,12 @@ export const AdminDashboard: React.FC = () => {
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [sessions, setSessions] = useState<QuizSession[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
-  const [settings, setSettings] = useState<Record<string, string>>({
-    app_name: 'SINESA',
-    app_logo: 'https://api.dicebear.com/7.x/shapes/svg?seed=sinesa',
-    theme_color: 'blue',
-    school_name: 'SDN 012 Babakan Ciparay',
-    school_npsn: '20219584',
-    school_address: 'Jl. Babakan Ciparay No. 12, Bandung',
-    registration_enabled: 'true',
-    allow_student_registration: 'true',
-    allow_guest_participants: 'true',
-    default_anti_cheat_enabled: 'false',
-    default_leaderboard_enabled: 'true',
-    default_show_final_result: 'true',
-  });
+  const globalSettings = useSettingsStore(s => s.settings);
+  const [settings, setSettings] = useState<Record<string, string>>(() => useSettingsStore.getState().settings);
+
+  useEffect(() => {
+    setSettings(globalSettings);
+  }, [globalSettings]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [userSessions, setUserSessions] = useState<UserSession[]>([]);
 
@@ -334,11 +327,9 @@ export const AdminDashboard: React.FC = () => {
         const sessRes = await SessionService.getAllSessions();
         if (sessRes.success && sessRes.data) setSessions(sessRes.data);
 
-        // Fetch system settings
-        const settsRes = await AdminService.getSettings();
-        if (settsRes.success && settsRes.data) {
-          setSettings(prev => ({ ...prev, ...settsRes.data }));
-        }
+        // Fetch system settings via unified store
+        const freshSettings = await useSettingsStore.getState().fetchSettings(true);
+        setSettings(freshSettings);
 
         // User sessions fallback
         setUserSessions([]);
@@ -801,21 +792,13 @@ export const AdminDashboard: React.FC = () => {
   // Settings Save Operation
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isMock) {
-      localStorage.setItem('mock_system_settings', JSON.stringify(settings));
-      createLog('SAVE_SETTINGS', 'Menyimpan konfigurasi pengaturan sistem global.');
-      showSuccess('Berhasil', 'Pengaturan sistem disimpan (Mode Mock)!');
-      return;
-    }
-
     try {
-      const res = await AdminService.updateSettings(settings);
-      if (!res.success) throw new Error(res.error?.message || 'Gagal menyimpan pengaturan');
-      createLog('SAVE_SETTINGS', 'Menyimpan konfigurasi pengaturan sistem global online.');
-      showSuccess('Berhasil', 'Pengaturan sistem berhasil disimpan online!');
+      await useSettingsStore.getState().updateSettings(settings as any);
+      createLog('SAVE_SETTINGS', 'Menyimpan konfigurasi pengaturan sistem & identitas sekolah.');
+      showSuccess('Berhasil', 'Pengaturan sistem & identitas sekolah berhasil disimpan!');
       await useAdminStore.getState().fetchStats(true);
     } catch(err: any) {
-      showError('Gagal', err.message);
+      showError('Gagal', err.message || 'Gagal menyimpan pengaturan');
     }
   };
 
@@ -930,15 +913,29 @@ export const AdminDashboard: React.FC = () => {
         <div>
           {/* Brand Header */}
           <div className="p-6 border-b border-border flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-amber-500 flex items-center justify-center text-yellow-950 font-black text-xl shadow-lg shadow-amber-500/20">
-              S
+            <div className="h-10 w-10 rounded-2xl bg-white border border-border/60 flex items-center justify-center p-1 shadow-md shadow-primary/10 shrink-0 overflow-hidden">
+              {settings.app_logo ? (
+                <img 
+                  data-testid="admin-brand-logo"
+                  src={settings.app_logo} 
+                  alt="Logo Aplikasi"
+                  className="h-8 w-8 object-contain"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = '/logo-sdn012.png';
+                  }}
+                />
+              ) : (
+                <span className="font-black text-primary text-xl">
+                  {(settings.app_name || 'S').charAt(0)}
+                </span>
+              )}
             </div>
             <div>
-              <h1 className="font-extrabold text-base tracking-tight leading-none text-foreground">
-                {settings.app_name} Admin
+              <h1 data-testid="admin-brand-name" className="font-extrabold text-base tracking-tight leading-none text-foreground">
+                {settings.app_name || 'SINESA'} Admin
               </h1>
-              <span className="text-[9px] text-muted-foreground font-black uppercase tracking-wider">
-                Control Center
+              <span className="text-[9px] text-muted-foreground font-black uppercase tracking-wider block mt-1 truncate max-w-[140px]">
+                {settings.school_name || 'Control Center'}
               </span>
             </div>
           </div>
@@ -1840,6 +1837,7 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Nama Sekolah</label>
                           <input 
+                            data-testid="input-school-name"
                             type="text"
                             value={settings.school_name || ''}
                             onChange={(e) => setSettings({ ...settings, school_name: e.target.value })}
@@ -1850,6 +1848,7 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">NPSN (Nomor Pokok Sekolah)</label>
                           <input 
+                            data-testid="input-school-npsn"
                             type="text"
                             value={settings.school_npsn || ''}
                             onChange={(e) => setSettings({ ...settings, school_npsn: e.target.value })}
@@ -1862,6 +1861,7 @@ export const AdminDashboard: React.FC = () => {
                       <div>
                         <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Alamat Sekolah</label>
                         <input 
+                          data-testid="input-school-address"
                           type="text"
                           value={settings.school_address || ''}
                           onChange={(e) => setSettings({ ...settings, school_address: e.target.value })}
@@ -1946,20 +1946,35 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Nama Aplikasi</label>
                           <input 
+                            data-testid="input-app-name"
                             type="text"
-                            value={settings.app_name}
+                            value={settings.app_name || ''}
                             onChange={(e) => setSettings({ ...settings, app_name: e.target.value })}
                             className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
                           />
                         </div>
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Logo URL</label>
-                          <input 
-                            type="text"
-                            value={settings.app_logo}
-                            onChange={(e) => setSettings({ ...settings, app_logo: e.target.value })}
-                            className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
-                          />
+                          <div className="flex gap-2 items-center">
+                            <div className="h-11 w-11 rounded-xl bg-white border border-border/60 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                              <img 
+                                src={settings.app_logo || '/logo-sdn012.png'} 
+                                alt="Logo Preview"
+                                className="h-9 w-9 object-contain"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = '/logo-sdn012.png';
+                                }}
+                              />
+                            </div>
+                            <input 
+                              data-testid="input-app-logo"
+                              type="text"
+                              value={settings.app_logo || ''}
+                              onChange={(e) => setSettings({ ...settings, app_logo: e.target.value })}
+                              placeholder="/logo-sdn012.png atau URL eksternal"
+                              className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
+                            />
+                          </div>
                         </div>
                       </div>
 
@@ -1967,7 +1982,8 @@ export const AdminDashboard: React.FC = () => {
                         <div>
                           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block mb-1.5">Warna Tema Utama</label>
                           <select
-                            value={settings.theme_color}
+                            data-testid="select-theme-color"
+                            value={settings.theme_color || 'blue'}
                             onChange={(e) => setSettings({ ...settings, theme_color: e.target.value })}
                             className="w-full rounded-2xl border border-border bg-background/50 px-4 py-3 text-sm font-semibold outline-none focus:border-primary text-foreground"
                           >
@@ -2061,6 +2077,7 @@ export const AdminDashboard: React.FC = () => {
                     </div>
 
                     <button
+                      data-testid="btn-save-settings"
                       type="submit"
                       className="rounded-2xl bg-amber-500 hover:bg-amber-600 text-yellow-950 font-black text-xs px-6 py-4 shadow-lg shadow-amber-500/25 transition active:scale-95"
                     >
