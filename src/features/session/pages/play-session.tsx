@@ -806,14 +806,6 @@ export const PlaySession: React.FC = () => {
         </div>
       );
     }
-    if (realtimeStatus === 'DISCONNECTED') {
-      return (
-        <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-red-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">
-          <AlertCircle className="w-3.5 h-3.5" />
-          Koneksi terputus
-        </div>
-      );
-    }
     if (realtimeStatus === 'ERROR') {
       return (
         <div data-testid="connection-banner" className="fixed top-3 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-2 bg-rose-600 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-xl backdrop-blur">

@@ -1086,7 +1086,10 @@ export const sessionActions = {
     const isMock = checkIsMock();
     if (isMock) return;
 
-    sessionActions.stopListening();
+    studentRealtimeUnsubs.forEach(unsub => {
+      try { unsub(); } catch (_) {}
+    });
+    studentRealtimeUnsubs = [];
 
     const participant = useParticipantStore.getState().participant;
     console.log('SUBSCRIPTION_STATUS', { role: 'student', sessionId, participantId: participant?.id || null, status: 'CONNECTING' });
