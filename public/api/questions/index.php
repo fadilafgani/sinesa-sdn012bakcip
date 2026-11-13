@@ -23,22 +23,89 @@ $pdo = get_db();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 /**
+ * Detect available columns in `questions` table and auto-migrate missing optional columns
+ * @return array<string, bool>
+ */
+function get_question_columns(PDO $pdo): array {
+    static $columns = null;
+    if ($columns !== null) {
+        return $columns;
+    }
+
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM questions");
+        $cols = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        // Attempt self-healing migration for missing optional columns (e.g. `duration`)
+        if (!isset($colMap['duration'])) {
+            try {
+                $pdo->exec("ALTER TABLE questions ADD COLUMN `duration` INT NOT NULL DEFAULT 30 AFTER `points`");
+                $stmt = $pdo->query("SHOW COLUMNS FROM questions");
+                $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+            } catch (Throwable $t) {
+                // Ignore DDL failure; dynamic query builder will omit duration safely
+            }
+        }
+        $columns = $colMap;
+    } catch (Throwable $t) {
+        $columns = [];
+    }
+
+    return $columns;
+}
+
+/**
+ * Detect available columns in `options` table and auto-migrate missing optional columns
+ * @return array<string, bool>
+ */
+function get_option_columns(PDO $pdo): array {
+    static $columns = null;
+    if ($columns !== null) {
+        return $columns;
+    }
+
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM options");
+        $cols = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        if (!isset($colMap['match_text'])) {
+            try {
+                $pdo->exec("ALTER TABLE options ADD COLUMN `match_text` TEXT NULL AFTER `is_correct`");
+                $stmt = $pdo->query("SHOW COLUMNS FROM options");
+                $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+            } catch (Throwable $t) {}
+        }
+        $columns = $colMap;
+    } catch (Throwable $t) {
+        $columns = [];
+    }
+
+    return $columns;
+}
+
+/**
  * Format question database row into typed JSON contract
  */
 function format_question_row(array $row, ?array $options = null): array {
+    $duration = isset($row['duration']) && $row['duration'] !== null
+        ? (int)$row['duration']
+        : (isset($row['timer']) && $row['timer'] !== null ? (int)$row['timer'] : 30);
+
     $res = [
         'id'            => (string)$row['id'],
         'quiz_id'       => (string)$row['quiz_id'],
         'question_text' => (string)$row['question_text'],
         'question_type' => (string)($row['question_type'] ?? 'multiple_choice'),
         'media_type'    => (string)($row['media_type'] ?? 'text'),
-        'media_url'     => $row['media_url'] !== null ? (string)$row['media_url'] : null,
+        'media_url'     => isset($row['media_url']) && $row['media_url'] !== null ? (string)$row['media_url'] : null,
         'points'        => (int)($row['points'] ?? 100),
-        'duration'      => (int)($row['duration'] ?? 30),
-        'timer'         => (int)($row['duration'] ?? 30),
+        'duration'      => $duration,
+        'timer'         => $duration,
         'order_index'   => (int)($row['order_index'] ?? 0),
-        'explanation'   => $row['explanation'] !== null ? (string)$row['explanation'] : null,
-        'created_at'    => (string)$row['created_at'],
+        'explanation'   => isset($row['explanation']) && $row['explanation'] !== null ? (string)$row['explanation'] : null,
+        'created_at'    => (string)($row['created_at'] ?? date('Y-m-d H:i:s')),
     ];
 
     if ($options !== null) {
@@ -57,8 +124,8 @@ function format_option_row(array $row): array {
         'question_id' => (string)$row['question_id'],
         'option_text' => (string)$row['option_text'],
         'is_correct'  => (bool)($row['is_correct'] ?? 0),
-        'match_text'  => $row['match_text'] !== null ? (string)$row['match_text'] : null,
-        'created_at'  => (string)$row['created_at'],
+        'match_text'  => isset($row['match_text']) && $row['match_text'] !== null ? (string)$row['match_text'] : null,
+        'created_at'  => (string)($row['created_at'] ?? date('Y-m-d H:i:s')),
     ];
 }
 
@@ -183,10 +250,22 @@ try {
                 send_error_response('Daftar opsi pilihan jawaban tidak valid atau kosong.', 400);
             }
 
+            $optCols = get_option_columns($pdo);
+            $hasMatchText = isset($optCols['match_text']);
+
+            $optColsList = ['id', 'question_id', 'option_text', 'is_correct'];
+            $optValsList = [':id', ':question_id', ':option_text', ':is_correct'];
+            if ($hasMatchText) {
+                $optColsList[] = 'match_text';
+                $optValsList[] = ':match_text';
+            }
+            $optColsList[] = 'created_at';
+            $optValsList[] = 'NOW()';
+
             $insertedOptions = [];
             $insOptStmt = $pdo->prepare("
-                INSERT INTO options (id, question_id, option_text, is_correct, match_text, created_at)
-                VALUES (:id, :question_id, :option_text, :is_correct, :match_text, NOW())
+                INSERT INTO options (" . implode(', ', $optColsList) . ")
+                VALUES (" . implode(', ', $optValsList) . ")
             ");
 
             foreach ($optionsList as $opt) {
@@ -200,13 +279,17 @@ try {
                     continue;
                 }
 
-                $insOptStmt->execute([
+                $optParams = [
                     ':id'          => $optId,
                     ':question_id' => $qId,
                     ':option_text' => $text,
                     ':is_correct'  => $isCorrect,
-                    ':match_text'  => $matchText,
-                ]);
+                ];
+                if ($hasMatchText) {
+                    $optParams[':match_text'] = $matchText;
+                }
+
+                $insOptStmt->execute($optParams);
 
                 $insertedOptions[] = [
                     'id'          => $optId,
@@ -258,35 +341,97 @@ try {
         $orderIndex   = (int)($input['order_index'] ?? 0);
         $explanation  = isset($input['explanation']) && $input['explanation'] !== '' ? sanitize_string((string)$input['explanation']) : null;
 
-        $insStmt = $pdo->prepare("
-            INSERT INTO questions (
-                id, quiz_id, question_text, question_type, media_type, media_url,
-                points, duration, order_index, explanation, created_at
-            ) VALUES (
-                :id, :quiz_id, :question_text, :question_type, :media_type, :media_url,
-                :points, :duration, :order_index, :explanation, NOW()
-            )
-        ");
+        $qCols = get_question_columns($pdo);
+        $hasDuration = isset($qCols['duration']);
 
-        $insStmt->execute([
-            ':id'            => $id,
-            ':quiz_id'       => $quizId,
-            ':question_text' => $questionText,
-            ':question_type' => $questionType,
-            ':media_type'    => $mediaType,
-            ':media_url'     => $mediaUrl,
-            ':points'        => $points,
-            ':duration'      => $duration,
-            ':order_index'   => $orderIndex,
-            ':explanation'   => $explanation,
-        ]);
+        // Check if question already exists (idempotent upsert for client-supplied ID)
+        $checkExisting = $pdo->prepare("SELECT id FROM questions WHERE id = :id LIMIT 1");
+        $checkExisting->execute([':id' => $id]);
+        $existingQ = $checkExisting->fetch();
+
+        if ($existingQ) {
+            $upCols = [
+                'quiz_id = :quiz_id',
+                'question_text = :question_text',
+                'question_type = :question_type',
+                'media_type = :media_type',
+                'media_url = :media_url',
+                'points = :points',
+            ];
+            if ($hasDuration) {
+                $upCols[] = 'duration = :duration';
+            }
+            $upCols[] = 'order_index = :order_index';
+            $upCols[] = 'explanation = :explanation';
+
+            $upSql = "UPDATE questions SET " . implode(', ', $upCols) . " WHERE id = :id";
+            $upStmt = $pdo->prepare($upSql);
+            $params = [
+                ':id'            => $id,
+                ':quiz_id'       => $quizId,
+                ':question_text' => $questionText,
+                ':question_type' => $questionType,
+                ':media_type'    => $mediaType,
+                ':media_url'     => $mediaUrl,
+                ':points'        => $points,
+                ':order_index'   => $orderIndex,
+                ':explanation'   => $explanation,
+            ];
+            if ($hasDuration) {
+                $params[':duration'] = $duration;
+            }
+            $upStmt->execute($params);
+        } else {
+            $insCols = ['id', 'quiz_id', 'question_text', 'question_type', 'media_type', 'media_url', 'points'];
+            $insVals = [':id', ':quiz_id', ':question_text', ':question_type', ':media_type', ':media_url', ':points'];
+            $params = [
+                ':id'            => $id,
+                ':quiz_id'       => $quizId,
+                ':question_text' => $questionText,
+                ':question_type' => $questionType,
+                ':media_type'    => $mediaType,
+                ':media_url'     => $mediaUrl,
+                ':points'        => $points,
+                ':order_index'   => $orderIndex,
+                ':explanation'   => $explanation,
+            ];
+
+            if ($hasDuration) {
+                $insCols[] = 'duration';
+                $insVals[] = ':duration';
+                $params[':duration'] = $duration;
+            }
+
+            $insCols[] = 'order_index';
+            $insCols[] = 'explanation';
+            $insCols[] = 'created_at';
+            $insVals[] = ':order_index';
+            $insVals[] = ':explanation';
+            $insVals[] = 'NOW()';
+
+            $insSql = "INSERT INTO questions (" . implode(', ', $insCols) . ") VALUES (" . implode(', ', $insVals) . ")";
+            $insStmt = $pdo->prepare($insSql);
+            $insStmt->execute($params);
+        }
 
         // Insert options if bundled inside question creation payload
         $createdOptions = [];
         if (isset($input['options']) && is_array($input['options'])) {
+            $optCols = get_option_columns($pdo);
+            $hasMatchText = isset($optCols['match_text']);
+
+            $optColsList = ['id', 'question_id', 'option_text', 'is_correct'];
+            $optValsList = [':id', ':question_id', ':option_text', ':is_correct'];
+            if ($hasMatchText) {
+                $optColsList[] = 'match_text';
+                $optValsList[] = ':match_text';
+            }
+            $optColsList[] = 'created_at';
+            $optValsList[] = 'NOW()';
+
             $insOptStmt = $pdo->prepare("
-                INSERT INTO options (id, question_id, option_text, is_correct, match_text, created_at)
-                VALUES (:id, :question_id, :option_text, :is_correct, :match_text, NOW())
+                INSERT INTO options (" . implode(', ', $optColsList) . ")
+                VALUES (" . implode(', ', $optValsList) . ")
             ");
             foreach ($input['options'] as $opt) {
                 $optId = sanitize_string($opt['id'] ?? generate_uuid());
@@ -296,13 +441,17 @@ try {
 
                 if ($optText === '') continue;
 
-                $insOptStmt->execute([
+                $optParams = [
                     ':id'          => $optId,
                     ':question_id' => $id,
                     ':option_text' => $optText,
                     ':is_correct'  => $isCorrect,
-                    ':match_text'  => $matchText,
-                ]);
+                ];
+                if ($hasMatchText) {
+                    $optParams[':match_text'] = $matchText;
+                }
+
+                $insOptStmt->execute($optParams);
 
                 $createdOptions[] = [
                     'id'          => $optId,
@@ -358,6 +507,7 @@ try {
         }
 
         // 2. Build dynamic update query
+        $qCols = get_question_columns($pdo);
         $updates = [];
         $params = [':id' => $questionId];
 
@@ -367,10 +517,13 @@ try {
             'media_type'    => 'string',
             'media_url'     => 'nullable_string',
             'points'        => 'int',
-            'duration'      => 'int',
             'order_index'   => 'int',
             'explanation'   => 'nullable_string',
         ];
+
+        if (isset($qCols['duration'])) {
+            $fields['duration'] = 'int';
+        }
 
         // Support timer alias for duration in update payload
         if (!array_key_exists('duration', $input) && array_key_exists('timer', $input)) {
@@ -531,7 +684,11 @@ try {
 
     send_error_response('Metode HTTP tidak didukung. Gunakan GET, POST, PUT, atau DELETE.', 405);
 
+} catch (PDOException $e) {
+    error_log('[QUESTIONS_DB_ERROR] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $msg = $e->getMessage();
+    send_error_response('Terjadi kegagalan database saat memproses data pertanyaan kuis: ' . $msg, 500);
 } catch (Throwable $e) {
     error_log('[QUESTIONS_API_ERROR] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-    send_error_response('Terjadi kegagalan internal saat memproses data pertanyaan kuis.', 500);
+    send_error_response('Terjadi kegagalan internal saat memproses data pertanyaan kuis: ' . $e->getMessage(), 500);
 }
