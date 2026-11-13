@@ -24,6 +24,61 @@ $pdo = get_db();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 /**
+ * Detect available columns in `quizzes` table and auto-migrate missing optional columns
+ * @return array<string, bool>
+ */
+function get_quiz_columns(PDO $pdo): array {
+    static $columns = null;
+    if ($columns !== null) {
+        return $columns;
+    }
+
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM quizzes");
+        $cols = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        // Attempt self-healing migration for missing optional columns
+        $missing = [];
+        if (!isset($colMap['subject'])) {
+            $missing[] = "ADD COLUMN `subject` VARCHAR(100) NULL AFTER `title`";
+        }
+        if (!isset($colMap['target_class'])) {
+            $missing[] = "ADD COLUMN `target_class` VARCHAR(50) NULL AFTER `subject`";
+        }
+
+        if (!empty($missing)) {
+            try {
+                $pdo->exec("ALTER TABLE quizzes " . implode(', ', $missing));
+                $stmt = $pdo->query("SHOW COLUMNS FROM quizzes");
+                $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+            } catch (Throwable $ddlError) {
+                try {
+                    if (!isset($colMap['subject'])) {
+                        $pdo->exec("ALTER TABLE quizzes ADD COLUMN `subject` VARCHAR(100) NULL");
+                    }
+                } catch (Throwable $t) {}
+                try {
+                    if (!isset($colMap['target_class'])) {
+                        $pdo->exec("ALTER TABLE quizzes ADD COLUMN `target_class` VARCHAR(50) NULL");
+                    }
+                } catch (Throwable $t) {}
+
+                try {
+                    $stmt = $pdo->query("SHOW COLUMNS FROM quizzes");
+                    $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+                } catch (Throwable $t) {}
+            }
+        }
+        $columns = $colMap;
+    } catch (Throwable $t) {
+        $columns = [];
+    }
+
+    return $columns;
+}
+
+/**
  * Format a quiz database row into typed JSON contract
  */
 function format_quiz_row(array $row): array {
@@ -31,8 +86,8 @@ function format_quiz_row(array $row): array {
         'id'                       => (string)$row['id'],
         'teacher_id'               => (string)$row['teacher_id'],
         'title'                    => (string)$row['title'],
-        'subject'                  => $row['subject'] !== null ? (string)$row['subject'] : '',
-        'target_class'             => $row['target_class'] !== null ? (string)$row['target_class'] : '',
+        'subject'                  => isset($row['subject']) && $row['subject'] !== null ? (string)$row['subject'] : '',
+        'target_class'             => isset($row['target_class']) && $row['target_class'] !== null ? (string)$row['target_class'] : '',
         'description'              => $row['description'] !== null ? (string)$row['description'] : null,
         'opening_text'             => $row['opening_text'] !== null ? (string)$row['opening_text'] : null,
         'closing_text'             => $row['closing_text'] !== null ? (string)$row['closing_text'] : null,
@@ -207,6 +262,10 @@ try {
         $status                 = in_array($input['status'] ?? 'active', ['active', 'inactive'], true) ? (string)($input['status'] ?? 'active') : 'active';
 
         // Check if quiz already exists (Idempotent Upsert for client-supplied ID)
+        $quizCols = get_quiz_columns($pdo);
+        $hasSubject = isset($quizCols['subject']);
+        $hasTargetClass = isset($quizCols['target_class']);
+
         $checkExisting = $pdo->prepare("SELECT id, teacher_id, pin_code FROM quizzes WHERE id = :id LIMIT 1");
         $checkExisting->execute([':id' => $id]);
         $existingQuiz = $checkExisting->fetch();
@@ -222,42 +281,44 @@ try {
                 $upPin = (string)$existingQuiz['pin_code'];
             }
 
-            $upStmt = $pdo->prepare("
-                UPDATE quizzes SET
-                    title = :title,
-                    subject = :subject,
-                    target_class = :target_class,
-                    description = :description,
-                    opening_text = :opening_text,
-                    closing_text = :closing_text,
-                    pin_code = :pin_code,
-                    duration_per_question = :duration_per_question,
-                    random_questions = :random_questions,
-                    random_options = :random_options,
-                    thumbnail_url = :thumbnail_url,
-                    quiz_mode = :quiz_mode,
-                    lives_count = :lives_count,
-                    show_final_result = :show_final_result,
-                    show_leaderboard = :show_leaderboard,
-                    show_correct_answer = :show_correct_answer,
-                    show_answer_review = :show_answer_review,
-                    show_question_result = :show_question_result,
-                    show_explanation = :show_explanation,
-                    show_score_per_question = :show_score_per_question,
-                    show_question_statistics = :show_question_statistics,
-                    anti_cheat_enabled = :anti_cheat_enabled,
-                    fullscreen_required = :fullscreen_required,
-                    auto_submit_on_violation = :auto_submit_on_violation,
-                    status = :status,
-                    updated_at = NOW()
-                WHERE id = :id
-            ");
+            $upFields = ['title = :title'];
+            if ($hasSubject) {
+                $upFields[] = 'subject = :subject';
+            }
+            if ($hasTargetClass) {
+                $upFields[] = 'target_class = :target_class';
+            }
+            $upFields = array_merge($upFields, [
+                'description = :description',
+                'opening_text = :opening_text',
+                'closing_text = :closing_text',
+                'pin_code = :pin_code',
+                'duration_per_question = :duration_per_question',
+                'random_questions = :random_questions',
+                'random_options = :random_options',
+                'thumbnail_url = :thumbnail_url',
+                'quiz_mode = :quiz_mode',
+                'lives_count = :lives_count',
+                'show_final_result = :show_final_result',
+                'show_leaderboard = :show_leaderboard',
+                'show_correct_answer = :show_correct_answer',
+                'show_answer_review = :show_answer_review',
+                'show_question_result = :show_question_result',
+                'show_explanation = :show_explanation',
+                'show_score_per_question = :show_score_per_question',
+                'show_question_statistics = :show_question_statistics',
+                'anti_cheat_enabled = :anti_cheat_enabled',
+                'fullscreen_required = :fullscreen_required',
+                'auto_submit_on_violation = :auto_submit_on_violation',
+                'status = :status',
+                'updated_at = NOW()'
+            ]);
 
-            $upStmt->execute([
+            $upStmt = $pdo->prepare("UPDATE quizzes SET " . implode(",\n                    ", $upFields) . " WHERE id = :id");
+
+            $upParams = [
                 ':id'                       => $id,
                 ':title'                    => $titleSafe,
-                ':subject'                  => $subject,
-                ':target_class'             => $targetClass,
                 ':description'              => $description,
                 ':opening_text'             => $openingText,
                 ':closing_text'             => $closingText,
@@ -280,7 +341,15 @@ try {
                 ':fullscreen_required'      => $fullscreenRequired,
                 ':auto_submit_on_violation' => $autoSubmitViolation,
                 ':status'                   => $status,
-            ]);
+            ];
+            if ($hasSubject) {
+                $upParams[':subject'] = $subject;
+            }
+            if ($hasTargetClass) {
+                $upParams[':target_class'] = $targetClass;
+            }
+
+            $upStmt->execute($upParams);
 
             $fetchStmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.id = :id LIMIT 1");
             $fetchStmt->execute([':id' => $id]);
@@ -303,58 +372,74 @@ try {
         }
         $pinSafe = mb_substr($pin, 0, 10);
 
-        $insStmt = $pdo->prepare("
-            INSERT INTO quizzes (
-                id, teacher_id, title, subject, target_class, description, opening_text, closing_text, pin_code,
-                duration_per_question, random_questions, random_options, thumbnail_url,
-                quiz_mode, lives_count, show_final_result, show_leaderboard, show_correct_answer,
-                show_answer_review, show_question_result, show_explanation, show_score_per_question,
-                show_question_statistics, anti_cheat_enabled, fullscreen_required, auto_submit_on_violation,
-                status, created_at, updated_at
-            ) VALUES (
-                :id, :teacher_id, :title, :subject, :target_class, :description, :opening_text, :closing_text, :pin_code,
-                :duration_per_question, :random_questions, :random_options, :thumbnail_url,
-                :quiz_mode, :lives_count, :show_final_result, :show_leaderboard, :show_correct_answer,
-                :show_answer_review, :show_question_result, :show_explanation, :show_score_per_question,
-                :show_question_statistics, :anti_cheat_enabled, :fullscreen_required, :auto_submit_on_violation,
-                :status, NOW(), NOW()
-            )
-        ");
+        $insertCols = ['id', 'teacher_id', 'title'];
+        $insertVals = [':id', ':teacher_id', ':title'];
+        $insParams = [
+            ':id'                       => $id,
+            ':teacher_id'               => $teacherId,
+            ':title'                    => $titleSafe,
+            ':description'              => $description,
+            ':opening_text'             => $openingText,
+            ':closing_text'             => $closingText,
+            ':pin_code'                 => $pinSafe,
+            ':duration_per_question'    => $durationPerQuestion,
+            ':random_questions'         => $randomQuestions,
+            ':random_options'           => $randomOptions,
+            ':thumbnail_url'            => $thumbnailUrl,
+            ':quiz_mode'                => $quizMode,
+            ':lives_count'              => $livesCount,
+            ':show_final_result'        => $showFinalResult,
+            ':show_leaderboard'         => $showLeaderboard,
+            ':show_correct_answer'      => $showCorrectAnswer,
+            ':show_answer_review'       => $showAnswerReview,
+            ':show_question_result'     => $showQuestionResult,
+            ':show_explanation'         => $showExplanation,
+            ':show_score_per_question'  => $showScorePerQuestion,
+            ':show_question_statistics' => $showQuestionStatistics,
+            ':anti_cheat_enabled'       => $antiCheatEnabled,
+            ':fullscreen_required'      => $fullscreenRequired,
+            ':auto_submit_on_violation' => $autoSubmitViolation,
+            ':status'                   => $status,
+        ];
+
+        if ($hasSubject) {
+            $insertCols[] = 'subject';
+            $insertVals[] = ':subject';
+            $insParams[':subject'] = $subject;
+        }
+        if ($hasTargetClass) {
+            $insertCols[] = 'target_class';
+            $insertVals[] = ':target_class';
+            $insParams[':target_class'] = $targetClass;
+        }
+
+        $commonCols = [
+            'description', 'opening_text', 'closing_text', 'pin_code',
+            'duration_per_question', 'random_questions', 'random_options', 'thumbnail_url',
+            'quiz_mode', 'lives_count', 'show_final_result', 'show_leaderboard', 'show_correct_answer',
+            'show_answer_review', 'show_question_result', 'show_explanation', 'show_score_per_question',
+            'show_question_statistics', 'anti_cheat_enabled', 'fullscreen_required', 'auto_submit_on_violation',
+            'status'
+        ];
+        foreach ($commonCols as $c) {
+            $insertCols[] = $c;
+            $insertVals[] = ":{$c}";
+        }
+        $insertCols[] = 'created_at';
+        $insertCols[] = 'updated_at';
+        $insertVals[] = 'NOW()';
+        $insertVals[] = 'NOW()';
+
+        $insSql = "INSERT INTO quizzes (" . implode(', ', $insertCols) . ") VALUES (" . implode(', ', $insertVals) . ")";
+        $insStmt = $pdo->prepare($insSql);
 
         $inserted = false;
         $attempts = 0;
         while (!$inserted && $attempts < 3) {
             $attempts++;
             try {
-                $insStmt->execute([
-                    ':id'                       => $id,
-                    ':teacher_id'               => $teacherId,
-                    ':title'                    => $titleSafe,
-                    ':subject'                  => $subject,
-                    ':target_class'             => $targetClass,
-                    ':description'              => $description,
-                    ':opening_text'             => $openingText,
-                    ':closing_text'             => $closingText,
-                    ':pin_code'                 => $pinSafe,
-                    ':duration_per_question'    => $durationPerQuestion,
-                    ':random_questions'         => $randomQuestions,
-                    ':random_options'           => $randomOptions,
-                    ':thumbnail_url'            => $thumbnailUrl,
-                    ':quiz_mode'                => $quizMode,
-                    ':lives_count'              => $livesCount,
-                    ':show_final_result'        => $showFinalResult,
-                    ':show_leaderboard'         => $showLeaderboard,
-                    ':show_correct_answer'      => $showCorrectAnswer,
-                    ':show_answer_review'       => $showAnswerReview,
-                    ':show_question_result'     => $showQuestionResult,
-                    ':show_explanation'         => $showExplanation,
-                    ':show_score_per_question'  => $showScorePerQuestion,
-                    ':show_question_statistics' => $showQuestionStatistics,
-                    ':anti_cheat_enabled'       => $antiCheatEnabled,
-                    ':fullscreen_required'      => $fullscreenRequired,
-                    ':auto_submit_on_violation' => $autoSubmitViolation,
-                    ':status'                   => $status,
-                ]);
+                $insParams[':pin_code'] = $pinSafe;
+                $insStmt->execute($insParams);
                 $inserted = true;
             } catch (PDOException $pdoErr) {
                 // If collision on PIN code, generate fresh PIN and retry
@@ -414,13 +499,12 @@ try {
         }
 
         // 3. Build dynamic update query
+        $quizCols = get_quiz_columns($pdo);
         $updates = [];
         $params = [':id' => $quizId];
 
         $fieldMappings = [
             'title'                    => 'string',
-            'subject'                  => 'nullable_string',
-            'target_class'             => 'nullable_string',
             'description'              => 'nullable_string',
             'opening_text'             => 'nullable_string',
             'closing_text'             => 'nullable_string',
@@ -443,6 +527,13 @@ try {
             'auto_submit_on_violation' => 'int',
             'status'                   => 'string',
         ];
+
+        if (isset($quizCols['subject'])) {
+            $fieldMappings['subject'] = 'nullable_string';
+        }
+        if (isset($quizCols['target_class'])) {
+            $fieldMappings['target_class'] = 'nullable_string';
+        }
 
         if ($userRole === 'admin' && isset($input['teacher_id'])) {
             $fieldMappings['teacher_id'] = 'string';
