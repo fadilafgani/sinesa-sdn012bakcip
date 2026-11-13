@@ -132,14 +132,17 @@ function generate_uuid(): string {
 }
 
 /**
- * Sanitize string value (trim and remove null bytes)
+ * Sanitize string value (trim and remove null bytes, handles any scalar or null)
  *
- * @param string|null $value
+ * @param mixed $value
  * @return string
  */
-function sanitize_string(?string $value): string {
+function sanitize_string($value): string {
     if ($value === null) {
         return '';
     }
-    return trim(str_replace(chr(0), '', $value));
+    if (is_array($value) || is_object($value)) {
+        return '';
+    }
+    return trim(str_replace(chr(0), '', (string)$value));
 }

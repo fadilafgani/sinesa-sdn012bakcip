@@ -180,27 +180,17 @@ try {
 
         $id = sanitize_string($input['id'] ?? generate_uuid());
 
-        // Generate or validate PIN
-        $pin = sanitize_string($input['pin_code'] ?? '');
-        if ($pin === '') {
-            $pin = generate_unique_pin($pdo);
-        } else {
-            $checkPin = $pdo->prepare("SELECT id FROM quizzes WHERE pin_code = :pin LIMIT 1");
-            $checkPin->execute([':pin' => $pin]);
-            if ($checkPin->fetch()) {
-                send_error_response('Kode PIN sudah digunakan kuis lain. Gunakan kode PIN lain.', 409);
-            }
-        }
-
-        $subject                = isset($input['subject']) && $input['subject'] !== '' ? sanitize_string((string)$input['subject']) : null;
-        $targetClass            = isset($input['target_class']) && $input['target_class'] !== '' ? sanitize_string((string)$input['target_class']) : null;
-        $description            = isset($input['description']) ? (string)$input['description'] : null;
-        $openingText            = isset($input['opening_text']) ? (string)$input['opening_text'] : null;
-        $closingText            = isset($input['closing_text']) ? (string)$input['closing_text'] : null;
+        // Safe truncation and validation of input attributes
+        $titleSafe        = mb_substr($title, 0, 255);
+        $subject          = isset($input['subject']) && $input['subject'] !== '' ? mb_substr(sanitize_string($input['subject']), 0, 100) : null;
+        $targetClass      = isset($input['target_class']) && $input['target_class'] !== '' ? mb_substr(sanitize_string($input['target_class']), 0, 50) : null;
+        $description      = isset($input['description']) && $input['description'] !== '' ? (string)$input['description'] : null;
+        $openingText      = isset($input['opening_text']) && $input['opening_text'] !== '' ? (string)$input['opening_text'] : null;
+        $closingText      = isset($input['closing_text']) && $input['closing_text'] !== '' ? (string)$input['closing_text'] : null;
         $durationPerQuestion    = (int)($input['duration_per_question'] ?? 30);
         $randomQuestions        = !empty($input['random_questions']) ? 1 : 0;
         $randomOptions          = !empty($input['random_options']) ? 1 : 0;
-        $thumbnailUrl           = isset($input['thumbnail_url']) && $input['thumbnail_url'] !== '' ? sanitize_string((string)$input['thumbnail_url']) : null;
+        $thumbnailUrl           = isset($input['thumbnail_url']) && $input['thumbnail_url'] !== '' ? (string)$input['thumbnail_url'] : null;
         $quizMode               = in_array($input['quiz_mode'] ?? 'serius', ['serius', 'santai'], true) ? (string)($input['quiz_mode'] ?? 'serius') : 'serius';
         $livesCount             = (int)($input['lives_count'] ?? 3);
         $showFinalResult        = isset($input['show_final_result']) ? (!empty($input['show_final_result']) ? 1 : 0) : 1;
@@ -215,6 +205,103 @@ try {
         $fullscreenRequired     = !empty($input['fullscreen_required']) ? 1 : 0;
         $autoSubmitViolation    = (int)($input['auto_submit_on_violation'] ?? 3);
         $status                 = in_array($input['status'] ?? 'active', ['active', 'inactive'], true) ? (string)($input['status'] ?? 'active') : 'active';
+
+        // Check if quiz already exists (Idempotent Upsert for client-supplied ID)
+        $checkExisting = $pdo->prepare("SELECT id, teacher_id, pin_code FROM quizzes WHERE id = :id LIMIT 1");
+        $checkExisting->execute([':id' => $id]);
+        $existingQuiz = $checkExisting->fetch();
+
+        if ($existingQuiz) {
+            // Ownership check
+            if ($userRole === 'teacher' && $existingQuiz['teacher_id'] !== $userId) {
+                send_error_response('Akses ditolak. Anda hanya diperbolehkan mengubah kuis milik Anda sendiri.', 403);
+            }
+
+            $upPin = sanitize_string($input['pin_code'] ?? ($existingQuiz['pin_code'] ?? ''));
+            if ($upPin === '') {
+                $upPin = (string)$existingQuiz['pin_code'];
+            }
+
+            $upStmt = $pdo->prepare("
+                UPDATE quizzes SET
+                    title = :title,
+                    subject = :subject,
+                    target_class = :target_class,
+                    description = :description,
+                    opening_text = :opening_text,
+                    closing_text = :closing_text,
+                    pin_code = :pin_code,
+                    duration_per_question = :duration_per_question,
+                    random_questions = :random_questions,
+                    random_options = :random_options,
+                    thumbnail_url = :thumbnail_url,
+                    quiz_mode = :quiz_mode,
+                    lives_count = :lives_count,
+                    show_final_result = :show_final_result,
+                    show_leaderboard = :show_leaderboard,
+                    show_correct_answer = :show_correct_answer,
+                    show_answer_review = :show_answer_review,
+                    show_question_result = :show_question_result,
+                    show_explanation = :show_explanation,
+                    show_score_per_question = :show_score_per_question,
+                    show_question_statistics = :show_question_statistics,
+                    anti_cheat_enabled = :anti_cheat_enabled,
+                    fullscreen_required = :fullscreen_required,
+                    auto_submit_on_violation = :auto_submit_on_violation,
+                    status = :status,
+                    updated_at = NOW()
+                WHERE id = :id
+            ");
+
+            $upStmt->execute([
+                ':id'                       => $id,
+                ':title'                    => $titleSafe,
+                ':subject'                  => $subject,
+                ':target_class'             => $targetClass,
+                ':description'              => $description,
+                ':opening_text'             => $openingText,
+                ':closing_text'             => $closingText,
+                ':pin_code'                 => mb_substr($upPin, 0, 10),
+                ':duration_per_question'    => $durationPerQuestion,
+                ':random_questions'         => $randomQuestions,
+                ':random_options'           => $randomOptions,
+                ':thumbnail_url'            => $thumbnailUrl,
+                ':quiz_mode'                => $quizMode,
+                ':lives_count'              => $livesCount,
+                ':show_final_result'        => $showFinalResult,
+                ':show_leaderboard'         => $showLeaderboard,
+                ':show_correct_answer'      => $showCorrectAnswer,
+                ':show_answer_review'       => $showAnswerReview,
+                ':show_question_result'     => $showQuestionResult,
+                ':show_explanation'         => $showExplanation,
+                ':show_score_per_question'  => $showScorePerQuestion,
+                ':show_question_statistics' => $showQuestionStatistics,
+                ':anti_cheat_enabled'       => $antiCheatEnabled,
+                ':fullscreen_required'      => $fullscreenRequired,
+                ':auto_submit_on_violation' => $autoSubmitViolation,
+                ':status'                   => $status,
+            ]);
+
+            $fetchStmt = $pdo->prepare("SELECT q.*, (SELECT COUNT(*) FROM questions WHERE questions.quiz_id = q.id) AS total_questions FROM quizzes q WHERE q.id = :id LIMIT 1");
+            $fetchStmt->execute([':id' => $id]);
+            $updatedQuiz = $fetchStmt->fetch();
+
+            send_json_response(format_quiz_row($updatedQuiz ?: []), 200);
+        }
+
+        // Generate or validate PIN
+        $pin = sanitize_string($input['pin_code'] ?? '');
+        if ($pin === '') {
+            $pin = generate_unique_pin($pdo);
+        } else {
+            $checkPin = $pdo->prepare("SELECT id FROM quizzes WHERE pin_code = :pin LIMIT 1");
+            $checkPin->execute([':pin' => $pin]);
+            if ($checkPin->fetch()) {
+                // If supplied PIN is taken, auto-regenerate a unique PIN so insertion does not fail
+                $pin = generate_unique_pin($pdo);
+            }
+        }
+        $pinSafe = mb_substr($pin, 0, 10);
 
         $insStmt = $pdo->prepare("
             INSERT INTO quizzes (
@@ -234,35 +321,50 @@ try {
             )
         ");
 
-        $insStmt->execute([
-            ':id'                       => $id,
-            ':teacher_id'               => $teacherId,
-            ':title'                    => $title,
-            ':subject'                  => $subject,
-            ':target_class'             => $targetClass,
-            ':description'              => $description,
-            ':opening_text'             => $openingText,
-            ':closing_text'             => $closingText,
-            ':pin_code'                 => $pin,
-            ':duration_per_question'    => $durationPerQuestion,
-            ':random_questions'         => $randomQuestions,
-            ':random_options'           => $randomOptions,
-            ':thumbnail_url'            => $thumbnailUrl,
-            ':quiz_mode'                => $quizMode,
-            ':lives_count'              => $livesCount,
-            ':show_final_result'        => $showFinalResult,
-            ':show_leaderboard'         => $showLeaderboard,
-            ':show_correct_answer'      => $showCorrectAnswer,
-            ':show_answer_review'       => $showAnswerReview,
-            ':show_question_result'     => $showQuestionResult,
-            ':show_explanation'         => $showExplanation,
-            ':show_score_per_question'  => $showScorePerQuestion,
-            ':show_question_statistics' => $showQuestionStatistics,
-            ':anti_cheat_enabled'       => $antiCheatEnabled,
-            ':fullscreen_required'      => $fullscreenRequired,
-            ':auto_submit_on_violation' => $autoSubmitViolation,
-            ':status'                   => $status,
-        ]);
+        $inserted = false;
+        $attempts = 0;
+        while (!$inserted && $attempts < 3) {
+            $attempts++;
+            try {
+                $insStmt->execute([
+                    ':id'                       => $id,
+                    ':teacher_id'               => $teacherId,
+                    ':title'                    => $titleSafe,
+                    ':subject'                  => $subject,
+                    ':target_class'             => $targetClass,
+                    ':description'              => $description,
+                    ':opening_text'             => $openingText,
+                    ':closing_text'             => $closingText,
+                    ':pin_code'                 => $pinSafe,
+                    ':duration_per_question'    => $durationPerQuestion,
+                    ':random_questions'         => $randomQuestions,
+                    ':random_options'           => $randomOptions,
+                    ':thumbnail_url'            => $thumbnailUrl,
+                    ':quiz_mode'                => $quizMode,
+                    ':lives_count'              => $livesCount,
+                    ':show_final_result'        => $showFinalResult,
+                    ':show_leaderboard'         => $showLeaderboard,
+                    ':show_correct_answer'      => $showCorrectAnswer,
+                    ':show_answer_review'       => $showAnswerReview,
+                    ':show_question_result'     => $showQuestionResult,
+                    ':show_explanation'         => $showExplanation,
+                    ':show_score_per_question'  => $showScorePerQuestion,
+                    ':show_question_statistics' => $showQuestionStatistics,
+                    ':anti_cheat_enabled'       => $antiCheatEnabled,
+                    ':fullscreen_required'      => $fullscreenRequired,
+                    ':auto_submit_on_violation' => $autoSubmitViolation,
+                    ':status'                   => $status,
+                ]);
+                $inserted = true;
+            } catch (PDOException $pdoErr) {
+                // If collision on PIN code, generate fresh PIN and retry
+                if (($pdoErr->getCode() === '23000' || str_contains($pdoErr->getMessage(), '1062')) && str_contains($pdoErr->getMessage(), 'pin_code')) {
+                    $pinSafe = mb_substr(generate_unique_pin($pdo), 0, 10);
+                    continue;
+                }
+                throw $pdoErr;
+            }
+        }
 
         // Fetch newly created quiz
         $fetchStmt = $pdo->prepare("SELECT * FROM quizzes WHERE id = :id LIMIT 1");
@@ -368,10 +470,23 @@ try {
                 if ($col === 'title' && $clean === '') {
                     send_error_response('Judul kuis tidak boleh kosong.', 400);
                 }
+                if ($col === 'title') {
+                    $clean = mb_substr($clean, 0, 255);
+                }
+                if ($col === 'quiz_mode') {
+                    $clean = in_array($clean, ['serius', 'santai'], true) ? $clean : 'serius';
+                }
+                if ($col === 'status') {
+                    $clean = in_array($clean, ['active', 'inactive'], true) ? $clean : 'active';
+                }
                 $updates[] = "{$col} = :{$col}";
                 $params[":{$col}"] = $clean;
             } elseif ($type === 'nullable_string') {
                 $clean = $val !== null ? sanitize_string((string)$val) : null;
+                if ($clean !== null && $clean !== '') {
+                    if ($col === 'subject') $clean = mb_substr($clean, 0, 100);
+                    if ($col === 'target_class') $clean = mb_substr($clean, 0, 50);
+                }
                 $updates[] = "{$col} = :{$col}";
                 $params[":{$col}"] = ($clean !== '' ? $clean : null);
             } elseif ($type === 'int') {
@@ -393,6 +508,10 @@ try {
         // Fetch updated quiz
         $fetchStmt->execute([':id' => $quizId]);
         $updated = $fetchStmt->fetch();
+
+        if (!$updated) {
+            send_error_response('Kuis tidak ditemukan setelah proses pembaruan.', 404);
+        }
 
         // Log activity
         try {
@@ -458,7 +577,17 @@ try {
 
     send_error_response('Metode HTTP tidak didukung. Gunakan GET, POST, PUT, atau DELETE.', 405);
 
+} catch (PDOException $e) {
+    error_log('[QUIZZES_DB_ERROR] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    $msg = $e->getMessage();
+    if ($e->getCode() === '23000' || str_contains($msg, '1062 Duplicate entry')) {
+        if (str_contains($msg, 'pin_code')) {
+            send_error_response('Kode PIN kuis sudah digunakan. Silakan gunakan PIN lain.', 409);
+        }
+        send_error_response('Data kuis dengan pengenal ini sudah ada dalam sistem.', 409);
+    }
+    send_error_response('Terjadi kegagalan database saat memproses data kuis: ' . $msg, 500);
 } catch (Throwable $e) {
     error_log('[QUIZZES_API_ERROR] ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
-    send_error_response('Terjadi kegagalan internal saat memproses data kuis.', 500);
+    send_error_response('Terjadi kegagalan internal saat memproses data kuis: ' . $e->getMessage(), 500);
 }

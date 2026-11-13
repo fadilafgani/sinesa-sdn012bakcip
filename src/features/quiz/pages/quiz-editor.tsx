@@ -120,6 +120,7 @@ export const QuizEditor: React.FC = () => {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [savedQuizId, setSavedQuizId] = useState<string | null>(null);
+  const [workingQuizId, setWorkingQuizId] = useState<string | null>(quizId);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
@@ -202,6 +203,7 @@ export const QuizEditor: React.FC = () => {
 
   // Fetch or setup quiz
   useEffect(() => {
+    setWorkingQuizId(quizId);
     const loadQuizData = async () => {
       setPageError(null);
       if (isNew || !quizId) return;
@@ -634,7 +636,8 @@ export const QuizEditor: React.FC = () => {
       const user = userRes.data?.session?.user || userRes.data?.user || useAuthStore.getState().user || useAuthStore.getState().profile;
       if (!user?.id) throw new Error('Sesi autentikasi telah berakhir. Silakan login kembali.');
 
-      const id = quizId || generateUUID();
+      const activeId = workingQuizId || quizId;
+      const id = activeId || generateUUID();
       const newQuiz = {
         id,
         teacher_id: user.id,
@@ -664,9 +667,9 @@ export const QuizEditor: React.FC = () => {
         auto_submit_on_violation: Number(values.auto_submit_on_violation) || 3,
       };
 
-      if (quizId) {
+      if (activeId) {
         // Update quiz details
-        const updateRes = await QuizService.updateQuiz(quizId, {
+        const updateRes = await QuizService.updateQuiz(activeId, {
           title: values.title,
           subject: values.subject || null,
           target_class: values.target_class || null,
@@ -700,11 +703,12 @@ export const QuizEditor: React.FC = () => {
         if (!createRes.success) {
           throw createRes.error || new Error('Gagal membuat kuis baru.');
         }
+        setWorkingQuizId(id);
       }
 
       // Delete existing questions for updates to handle modifications
-      if (quizId) {
-        const delRes = await QuestionService.deleteQuestionsByQuizId(quizId);
+      if (activeId) {
+        const delRes = await QuestionService.deleteQuestionsByQuizId(activeId);
         if (!delRes.success) {
           throw delRes.error || new Error('Gagal memperbarui daftar soal lama.');
         }
