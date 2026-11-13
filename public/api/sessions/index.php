@@ -30,6 +30,58 @@ function format_dt_utc(?string $dtStr): ?string {
 }
 
 /**
+ * Detect available columns in `quiz_sessions` table and auto-migrate missing optional columns
+ * @return array<string, bool>
+ */
+function get_session_columns(PDO $pdo): array {
+    static $columns = null;
+    if ($columns !== null) {
+        return $columns;
+    }
+
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM quiz_sessions");
+        $cols = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        // Attempt self-healing migration for countdown columns
+        $missing = [];
+        if (!isset($colMap['countdown_started_at'])) {
+            $missing[] = "ADD COLUMN `countdown_started_at` DATETIME(3) NULL AFTER `current_question_index`";
+        }
+        if (!isset($colMap['countdown_expires_at'])) {
+            $missing[] = "ADD COLUMN `countdown_expires_at` DATETIME(3) NULL AFTER `countdown_started_at`";
+        }
+        if (!isset($colMap['countdown_duration'])) {
+            $missing[] = "ADD COLUMN `countdown_duration` INT NOT NULL DEFAULT 3 AFTER `countdown_expires_at`";
+        }
+
+        if (!empty($missing)) {
+            try {
+                $pdo->exec("ALTER TABLE quiz_sessions " . implode(', ', $missing));
+                $stmt = $pdo->query("SHOW COLUMNS FROM quiz_sessions");
+                $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+            } catch (Throwable $t) {
+                foreach ($missing as $mSql) {
+                    try {
+                        $pdo->exec("ALTER TABLE quiz_sessions " . $mSql);
+                    } catch (Throwable $e) {}
+                }
+                try {
+                    $stmt = $pdo->query("SHOW COLUMNS FROM quiz_sessions");
+                    $colMap = array_fill_keys($stmt->fetchAll(PDO::FETCH_COLUMN), true);
+                } catch (Throwable $e) {}
+            }
+        }
+        $columns = $colMap;
+    } catch (Throwable $t) {
+        $columns = [];
+    }
+
+    return $columns;
+}
+
+/**
  * Format a quiz_session database row into typed JSON contract
  */
 function format_session_row(array $row): array {
@@ -523,6 +575,11 @@ try {
         }
 
         // Build dynamic fields to update
+        $sessCols = get_session_columns($pdo);
+        $hasCStarted  = isset($sessCols['countdown_started_at']);
+        $hasCExpires  = isset($sessCols['countdown_expires_at']);
+        $hasCDuration = isset($sessCols['countdown_duration']);
+
         $fields = [];
         $params = [':id' => $id];
 
@@ -550,30 +607,36 @@ try {
                     ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_expires_at']))
                     : date('Y-m-d H:i:s.v', (int)($nowMicro + $duration));
 
-                $fields[] = "`countdown_started_at` = :countdown_started_at";
-                $params[':countdown_started_at'] = $cStartedAt;
-                $fields[] = "`countdown_expires_at` = :countdown_expires_at";
-                $params[':countdown_expires_at'] = $cExpiresAt;
-                $fields[] = "`countdown_duration` = :countdown_duration";
-                $params[':countdown_duration'] = $duration;
+                if ($hasCStarted) {
+                    $fields[] = "`countdown_started_at` = :countdown_started_at";
+                    $params[':countdown_started_at'] = $cStartedAt;
+                }
+                if ($hasCExpires) {
+                    $fields[] = "`countdown_expires_at` = :countdown_expires_at";
+                    $params[':countdown_expires_at'] = $cExpiresAt;
+                }
+                if ($hasCDuration) {
+                    $fields[] = "`countdown_duration` = :countdown_duration";
+                    $params[':countdown_duration'] = $duration;
+                }
             }
         }
 
-        if (array_key_exists('countdown_started_at', $input) && !isset($params[':countdown_started_at'])) {
+        if ($hasCStarted && array_key_exists('countdown_started_at', $input) && !isset($params[':countdown_started_at'])) {
             $fields[] = "`countdown_started_at` = :countdown_started_at";
             $params[':countdown_started_at'] = $input['countdown_started_at'] !== null
                 ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_started_at']))
                 : null;
         }
 
-        if (array_key_exists('countdown_expires_at', $input) && !isset($params[':countdown_expires_at'])) {
+        if ($hasCExpires && array_key_exists('countdown_expires_at', $input) && !isset($params[':countdown_expires_at'])) {
             $fields[] = "`countdown_expires_at` = :countdown_expires_at";
             $params[':countdown_expires_at'] = $input['countdown_expires_at'] !== null
                 ? date('Y-m-d H:i:s.v', strtotime((string)$input['countdown_expires_at']))
                 : null;
         }
 
-        if (isset($input['countdown_duration']) && !isset($params[':countdown_duration'])) {
+        if ($hasCDuration && isset($input['countdown_duration']) && !isset($params[':countdown_duration'])) {
             $fields[] = "`countdown_duration` = :countdown_duration";
             $params[':countdown_duration'] = max(1, min(10, (int)$input['countdown_duration']));
         }

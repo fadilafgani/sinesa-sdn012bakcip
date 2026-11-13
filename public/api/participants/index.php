@@ -23,6 +23,52 @@ $pdo = get_db();
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 /**
+ * Detect available columns in `quiz_sessions` table and auto-migrate missing countdown columns
+ */
+function ensure_session_countdown_columns(PDO $pdo): bool {
+    static $hasCountdown = null;
+    if ($hasCountdown !== null) return $hasCountdown;
+
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        $missing = [];
+        if (!isset($colMap['countdown_started_at'])) {
+            $missing[] = "ADD COLUMN `countdown_started_at` DATETIME(3) NULL AFTER `current_question_index`";
+        }
+        if (!isset($colMap['countdown_expires_at'])) {
+            $missing[] = "ADD COLUMN `countdown_expires_at` DATETIME(3) NULL AFTER `countdown_started_at`";
+        }
+        if (!isset($colMap['countdown_duration'])) {
+            $missing[] = "ADD COLUMN `countdown_duration` INT NOT NULL DEFAULT 3 AFTER `countdown_expires_at`";
+        }
+
+        if (!empty($missing)) {
+            try {
+                $pdo->exec("ALTER TABLE quiz_sessions " . implode(', ', $missing));
+                $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+                $colMap = array_fill_keys($cols, true);
+            } catch (Throwable $t) {
+                foreach ($missing as $mSql) {
+                    try {
+                        $pdo->exec("ALTER TABLE quiz_sessions " . $mSql);
+                    } catch (Throwable $e) {}
+                }
+                try {
+                    $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+                    $colMap = array_fill_keys($cols, true);
+                } catch (Throwable $e) {}
+            }
+        }
+        $hasCountdown = isset($colMap['countdown_started_at']);
+    } catch (Throwable $t) {
+        $hasCountdown = false;
+    }
+    return $hasCountdown;
+}
+
+/**
  * Compute participant statistics (correct, incorrect, unanswered, accuracy)
  */
 function compute_participant_statistics(PDO $pdo, string $participantId, string $sessionId): array {
@@ -141,14 +187,21 @@ try {
 
         // 1. Participant with Quiz Details (for post-quiz summary & review)
         if ($id !== '' && $withDetails) {
+            $hasCountdown = ensure_session_countdown_columns($pdo);
+            $cSelect = $hasCountdown
+                ? "s.countdown_started_at AS s_countdown_started_at,
+                   s.countdown_expires_at AS s_countdown_expires_at,
+                   s.countdown_duration AS s_countdown_duration,"
+                : "NULL AS s_countdown_started_at,
+                   NULL AS s_countdown_expires_at,
+                   3 AS s_countdown_duration,";
+
             $stmt = $pdo->prepare("
                 SELECT p.*,
                        s.id AS s_id, s.quiz_id AS s_quiz_id, s.host_id AS s_host_id,
                        s.status AS s_status, s.current_stage AS s_current_stage,
                        s.current_question_index AS s_current_question_index,
-                       s.countdown_started_at AS s_countdown_started_at,
-                       s.countdown_expires_at AS s_countdown_expires_at,
-                       s.countdown_duration AS s_countdown_duration,
+                       {$cSelect}
                        s.question_started_at AS s_question_started_at,
                        s.question_expires_at AS s_question_expires_at,
                        s.quiz_mode AS s_quiz_mode, s.lives_count AS s_lives_count,

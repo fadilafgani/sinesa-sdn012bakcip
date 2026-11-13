@@ -118,6 +118,52 @@ function send_sse_event(string $event, array $data, ?string $id = null): void {
     @flush();
 }
 
+/**
+ * Detect available columns in `quiz_sessions` table and auto-migrate missing countdown columns
+ */
+function ensure_session_countdown_columns(PDO $pdo): bool {
+    static $hasCountdown = null;
+    if ($hasCountdown !== null) return $hasCountdown;
+
+    try {
+        $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+        $colMap = array_fill_keys($cols, true);
+
+        $missing = [];
+        if (!isset($colMap['countdown_started_at'])) {
+            $missing[] = "ADD COLUMN `countdown_started_at` DATETIME(3) NULL AFTER `current_question_index`";
+        }
+        if (!isset($colMap['countdown_expires_at'])) {
+            $missing[] = "ADD COLUMN `countdown_expires_at` DATETIME(3) NULL AFTER `countdown_started_at`";
+        }
+        if (!isset($colMap['countdown_duration'])) {
+            $missing[] = "ADD COLUMN `countdown_duration` INT NOT NULL DEFAULT 3 AFTER `countdown_expires_at`";
+        }
+
+        if (!empty($missing)) {
+            try {
+                $pdo->exec("ALTER TABLE quiz_sessions " . implode(', ', $missing));
+                $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+                $colMap = array_fill_keys($cols, true);
+            } catch (Throwable $t) {
+                foreach ($missing as $mSql) {
+                    try {
+                        $pdo->exec("ALTER TABLE quiz_sessions " . $mSql);
+                    } catch (Throwable $e) {}
+                }
+                try {
+                    $cols = $pdo->query("SHOW COLUMNS FROM quiz_sessions")->fetchAll(PDO::FETCH_COLUMN);
+                    $colMap = array_fill_keys($cols, true);
+                } catch (Throwable $e) {}
+            }
+        }
+        $hasCountdown = isset($colMap['countdown_started_at']);
+    } catch (Throwable $t) {
+        $hasCountdown = false;
+    }
+    return $hasCountdown;
+}
+
 // -------------------------------------------------------------------------
 // 3. PARAMETER PARSING & STRUCTURED AUDIT LOGGING
 // -------------------------------------------------------------------------
@@ -240,10 +286,15 @@ try {
 
         try {
             // Single composite lightweight query to check all state changes at once
+            $hasCountdown = ensure_session_countdown_columns($pdo);
+            $cSelect = $hasCountdown
+                ? "s.countdown_started_at, s.countdown_expires_at, s.countdown_duration,"
+                : "NULL AS countdown_started_at, NULL AS countdown_expires_at, 3 AS countdown_duration,";
+
             $stmt = $pdo->prepare("
                 SELECT 
                     s.id, s.quiz_id, s.host_id, s.status, s.current_stage,
-                    s.current_question_index, s.countdown_started_at, s.countdown_expires_at, s.countdown_duration,
+                    s.current_question_index, {$cSelect}
                     s.question_started_at, s.question_expires_at,
                     s.quiz_mode, s.lives_count, s.completed_at,
                     s.show_final_result, s.show_leaderboard, s.show_correct_answer, s.show_answer_review,
