@@ -233,7 +233,11 @@ export const sessionActions = {
           }
         }
 
-        useSessionStore.setState({ activeSession: sessionData as QuizSession, quiz: quizData as Quiz });
+        useSessionStore.setState({
+          activeSession: sessionData as QuizSession,
+          quiz: quizData as Quiz,
+          ...(sessionData.server_time ? { serverTimeOffset: Date.now() - sessionData.server_time } : {})
+        });
         useParticipantStore.setState({ participants: [] });
         useAnswerStore.setState({ submissions: [] });
         useQuestionStore.setState({ currentQuestion: activeQuestion, currentOptions: activeOptions, questions: loadedQuestions });
@@ -315,6 +319,8 @@ export const sessionActions = {
       countdown_started_at: now.toISOString(),
       countdown_expires_at: countdownExpires.toISOString(),
       countdown_duration: countdownDuration,
+      question_started_at: null,
+      question_expires_at: null,
     };
 
     await updateSessionStage(
@@ -326,6 +332,8 @@ export const sessionActions = {
         countdown_started_at: now.toISOString(),
         countdown_expires_at: countdownExpires.toISOString(),
         countdown_duration: countdownDuration,
+        question_started_at: null,
+        question_expires_at: null,
       },
       updated,
       firstQuestion ? { currentQuestion: firstQuestion } : undefined
@@ -393,6 +401,8 @@ export const sessionActions = {
       countdown_started_at: now.toISOString(),
       countdown_expires_at: countdownExpires.toISOString(),
       countdown_duration: countdownDuration,
+      question_started_at: null,
+      question_expires_at: null,
     };
 
     useQuestionStore.setState({
@@ -409,6 +419,8 @@ export const sessionActions = {
         countdown_started_at: now.toISOString(),
         countdown_expires_at: countdownExpires.toISOString(),
         countdown_duration: countdownDuration,
+        question_started_at: null,
+        question_expires_at: null,
       },
       updatedSession
     );
@@ -484,6 +496,8 @@ export const sessionActions = {
     const updatedSession: QuizSession = {
       ...session,
       current_stage: 'question',
+      countdown_started_at: null,
+      countdown_expires_at: null,
       question_started_at: now.toISOString(),
       question_expires_at: expiresAt.toISOString(),
     };
@@ -553,6 +567,8 @@ export const sessionActions = {
         session.id,
         {
           current_stage: 'question',
+          countdown_started_at: null,
+          countdown_expires_at: null,
           question_started_at: now.toISOString(),
           question_expires_at: expiresAt.toISOString(),
         },
@@ -731,6 +747,9 @@ export const sessionActions = {
       }
 
       console.log('STORE_UPDATED', 'activeSession', updatedSess);
+      if (updatedSess.server_time) {
+        useSessionStore.setState({ serverTimeOffset: Date.now() - updatedSess.server_time });
+      }
       useSessionStore.setState({ activeSession: updatedSess });
       useQuestionStore.setState({
         currentQuestion: activeQuestion,
@@ -1036,7 +1055,11 @@ export const sessionActions = {
           }
         }
 
-        useSessionStore.setState({ session: sessionData as QuizSession, quiz: quizData as Quiz });
+        useSessionStore.setState({
+          session: sessionData as QuizSession,
+          quiz: quizData as Quiz,
+          ...(sessionData.server_time ? { serverTimeOffset: Date.now() - sessionData.server_time } : {})
+        });
         useParticipantStore.setState({ participant: partData as Participant, lives: partData.lives !== undefined && partData.lives !== null ? partData.lives : (quizData?.lives_count !== undefined ? quizData.lives_count : 3) });
         useQuestionStore.setState({ questions: loadedQs, currentQuestionIndex: sessionData.current_question_index >= 0 ? sessionData.current_question_index : 0 });
         useAnswerStore.setState({
@@ -1112,6 +1135,9 @@ export const sessionActions = {
       const isIndexChanged = !currentSession || currentSession.current_question_index !== updatedSess.current_question_index;
 
       console.log('STORE_UPDATED', { type: 'session', stage: updatedSess.current_stage, index: updatedSess.current_question_index });
+      if (updatedSess.server_time) {
+        useSessionStore.setState({ serverTimeOffset: Date.now() - updatedSess.server_time });
+      }
       useSessionStore.setState({ session: updatedSess });
 
       if (isStageChanged || isIndexChanged) {

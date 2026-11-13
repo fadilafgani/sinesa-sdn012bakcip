@@ -202,7 +202,7 @@ export const PlaySession: React.FC = () => {
     );
   };
 
-  const serverTimeOffset = session?.server_time ? Date.now() - session.server_time : 0;
+  const serverTimeOffset = useSessionStore(state => state.serverTimeOffset) || 0;
 
   // Shared countdown hook for student side (synchronized with Host)
   const isCountdownStage = session?.current_stage === 'countdown';
@@ -288,7 +288,15 @@ export const PlaySession: React.FC = () => {
 
   const selectedOptionIdsRef = useRef<string[]>([]);
   const matchingAnswersRef = useRef<Record<string, string>>({});
+  const activeQuestionIdRef = useRef<string | null>(null);
   const rejoinAttempted = useRef(false);
+
+  // Synchronously reset input buffers if question changed to prevent cross-question bleeding
+  if (currentQuestion?.id !== activeQuestionIdRef.current) {
+    activeQuestionIdRef.current = currentQuestion?.id || null;
+    selectedOptionIdsRef.current = [];
+    matchingAnswersRef.current = {};
+  }
 
   // Zoom Media State
   const [zoomImage, setZoomImage] = useState<string | null>(null);

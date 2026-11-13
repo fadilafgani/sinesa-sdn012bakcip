@@ -360,7 +360,8 @@ try {
                 $cExpiresTs = strtotime((string)$row['countdown_expires_at']);
                 if (microtime(true) >= $cExpiresTs) {
                     $qStartedAt = (string)$row['countdown_expires_at'];
-                    $qExpiresAt = !empty($row['question_expires_at'])
+                    $qExpTs = !empty($row['question_expires_at']) ? strtotime((string)$row['question_expires_at']) : 0;
+                    $qExpiresAt = ($qExpTs > $cExpiresTs)
                         ? (string)$row['question_expires_at']
                         : date('Y-m-d H:i:s.v', $cExpiresTs + 30);
 
@@ -368,8 +369,10 @@ try {
                         $autoUpd = $pdo->prepare("
                             UPDATE quiz_sessions 
                             SET current_stage = 'question', 
-                                question_started_at = COALESCE(question_started_at, :qstart),
-                                question_expires_at = COALESCE(question_expires_at, :qexp)
+                                countdown_started_at = NULL,
+                                countdown_expires_at = NULL,
+                                question_started_at = :qstart,
+                                question_expires_at = :qexp
                             WHERE id = :sid AND current_stage = 'countdown'
                         ");
                         $autoUpd->execute([
@@ -382,6 +385,8 @@ try {
                     }
                     $currentStage = 'question';
                     $row['current_stage'] = 'question';
+                    $row['countdown_started_at'] = null;
+                    $row['countdown_expires_at'] = null;
                     $row['question_started_at'] = $qStartedAt;
                     $row['question_expires_at'] = $qExpiresAt;
                 }

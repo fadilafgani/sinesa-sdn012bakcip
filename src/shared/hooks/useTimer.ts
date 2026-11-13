@@ -19,6 +19,7 @@ export const useTimer = ({
   const onTimeUpRef = useRef(onTimeUp);
   const onTickRef = useRef(onTick);
   const hasCompletedRef = useRef<boolean>(false);
+  const hasTickedPositiveRef = useRef<boolean>(false);
 
   useEffect(() => {
     onTimeUpRef.current = onTimeUp;
@@ -31,6 +32,7 @@ export const useTimer = ({
   // Reset completion flag whenever target expiry changes
   useEffect(() => {
     hasCompletedRef.current = false;
+    hasTickedPositiveRef.current = false;
   }, [expiresAt, enabled]);
 
   useEffect(() => {
@@ -66,8 +68,12 @@ export const useTimer = ({
         };
       }
 
+      if (remainingMs > 0) {
+        hasTickedPositiveRef.current = true;
+      }
+
       if (remainingMs <= 0) {
-        if (!hasCompletedRef.current) {
+        if (!hasCompletedRef.current && hasTickedPositiveRef.current) {
           hasCompletedRef.current = true;
           onTimeUpRef.current?.();
         }

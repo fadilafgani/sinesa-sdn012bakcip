@@ -487,7 +487,7 @@ export const HostSession: React.FC = () => {
     }
   }, [activeSession?.id, activeSession?.current_stage, activeSession?.status, isMock, fetchParticipants]);
 
-  const serverTimeOffset = activeSession?.server_time ? Date.now() - activeSession.server_time : 0;
+  const serverTimeOffset = useSessionStore(state => state.serverTimeOffset) || 0;
 
   // Manage countdown automatically via custom hook (anchored to shared server timestamp)
   const isCountdownStage = activeSession?.current_stage === 'countdown';
