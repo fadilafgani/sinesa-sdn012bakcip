@@ -167,7 +167,7 @@ function ensure_session_countdown_columns(PDO $pdo): bool {
 // -------------------------------------------------------------------------
 // 3. PARAMETER PARSING & STRUCTURED AUDIT LOGGING
 // -------------------------------------------------------------------------
-@set_time_limit(35);
+@set_time_limit(60);
 @ignore_user_abort(false);
 
 $sessionId = sanitize_string($_GET['session_id'] ?? '');
@@ -247,8 +247,8 @@ if ($role === 'host') {
 
 error_log(sprintf("[SINESA_STREAM_AUDIT] AUTH_OK session_id=%s role=%s user=%s", $sessionId, $role, $authUser ? ($authUser['sub'] ?? 'unknown') : 'student'));
 
-// Initial 2KB padding to defeat proxy / Apache buffer + retry instruction
-echo ":" . str_repeat(" ", 2048) . "\n\n";
+// Initial 4KB padding to defeat proxy / Apache buffer + retry instruction
+echo ":" . str_repeat(" ", 4096) . "\n\n";
 echo "retry: 3000\n\n"; // 3s retry interval avoids stampedes and thread exhaustion on reconnect
 if (ob_get_level() > 0) {
     @ob_flush();
@@ -259,7 +259,7 @@ if (ob_get_level() > 0) {
 // 4. STREAMING LOOP WITH PROCESS LIFECYCLE & IMMEDIATE ABORT DETECTION
 // -------------------------------------------------------------------------
 $startTime = time();
-$maxDuration = 25; // 25s clean cycle prevents PHP-FPM / worker thread starvation
+$maxDuration = 45; // 45s clean cycle prevents PHP-FPM / worker thread starvation
 
 $lastStageSignature = null;
 $lastTotalScore = -1;
@@ -271,9 +271,39 @@ $pingCount = 0;
 // Initialize known participant IDs set to prevent missing participants on datetime collisions
 $knownParticipantIds = [];
 try {
-    $initPartStmt = $pdo->prepare("SELECT id FROM participants WHERE session_id = :sid");
+    $initPartStmt = $pdo->prepare("
+        SELECT id, session_id, student_id, display_name, score, lives, current_progress, joined_at
+        FROM participants 
+        WHERE session_id = :sid 
+        ORDER BY score DESC, joined_at ASC
+    ");
     $initPartStmt->execute([':sid' => $sessionId]);
-    $knownParticipantIds = array_flip($initPartStmt->fetchAll(PDO::FETCH_COLUMN));
+    $initialParts = $initPartStmt->fetchAll();
+    foreach ($initialParts as $ip) {
+        $knownParticipantIds[(string)$ip['id']] = true;
+    }
+
+    // ponytail: Immediately emit initial synced participants to eliminate lobby lag on new connection
+    if (!empty($initialParts)) {
+        $syncedInitPayload = array_map(function($p) {
+            return [
+                'id'           => (string)$p['id'],
+                'session_id'   => (string)$p['session_id'],
+                'student_id'   => $p['student_id'] !== null ? (string)$p['student_id'] : null,
+                'display_name' => (string)$p['display_name'],
+                'score'        => (int)$p['score'],
+                'lives'        => (int)$p['lives'],
+                'joined_at'    => (string)$p['joined_at'],
+            ];
+        }, $initialParts);
+
+        send_sse_event('ParticipantsSynced', [
+            'session_id'   => $sessionId,
+            'participants' => $syncedInitPayload,
+            'count'        => count($initialParts),
+            'timestamp'    => round(microtime(true) * 1000)
+        ]);
+    }
 } catch (Throwable $e) {
     $knownParticipantIds = [];
 }

@@ -116,6 +116,7 @@ function format_session_row(array $row): array {
         'participant_count'        => (int)($row['participant_count'] ?? 0),
         'active_participant_count' => (int)($row['active_participant_count'] ?? 0),
         'total_violations'         => (int)($row['total_violations'] ?? 0),
+        'total_answers'            => (int)($row['total_answers'] ?? 0),
     ];
 }
 
@@ -136,7 +137,8 @@ try {
             s.*,
             (SELECT COUNT(*) FROM participants WHERE session_id = s.id) AS participant_count,
             (SELECT COUNT(*) FROM participants WHERE session_id = s.id AND is_completed = 0) AS active_participant_count,
-            (SELECT COALESCE(SUM(violation_count), 0) FROM participants WHERE session_id = s.id) AS total_violations
+            (SELECT COALESCE(SUM(violation_count), 0) FROM participants WHERE session_id = s.id) AS total_violations,
+            (SELECT COUNT(*) FROM answers a INNER JOIN participants p ON a.participant_id = p.id WHERE p.session_id = s.id) AS total_answers
         ";
 
         // 1. Get single session by ID
