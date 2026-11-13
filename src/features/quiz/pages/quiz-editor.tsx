@@ -21,6 +21,18 @@ import { mediaStorageService } from '@/shared/services/media-storage';
 import { LazyImage } from '@/shared/components/lazy-image';
 import { getSafeMediaUrl } from '@/shared/utils/media';
 
+// Safe UUID generator supporting non-secure contexts and older browsers
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 // Validation Schema using Zod
 const optionSchema = z.object({
   id: z.string().optional(),
@@ -33,9 +45,9 @@ const questionSchema = z.object({
   id: z.string().optional(),
   question_text: z.string().min(3, 'Pertanyaan minimal harus 3 karakter'),
   question_type: z.enum(['multiple_choice', 'true_false', 'multiple_answer', 'matching']).default('multiple_choice'),
-  media_type: z.enum(['text', 'image', 'audio', 'video', 'latex']),
+  media_type: z.enum(['text', 'image', 'audio', 'video', 'latex']).default('text'),
   media_url: z.string().nullable().optional(),
-  points: z.coerce.number().min(10).max(10000).default(100),
+  points: z.coerce.number().min(10, 'Poin minimal 10').max(10000, 'Poin maksimal 10.000').default(100),
   duration: z.coerce.number().min(5, 'Durasi minimal 5 detik').max(300, 'Durasi maksimal 300 detik').default(30),
   explanation: z.string().optional().nullable(),
   options: z.array(optionSchema).min(2, 'Minimal harus ada 2 opsi pilihan').max(6, 'Maksimal 6 opsi pilihan'),
@@ -48,7 +60,7 @@ const quizFormSchema = z.object({
   description: z.string().optional(),
   opening_text: z.string().optional(),
   closing_text: z.string().optional(),
-  duration_per_question: z.coerce.number().min(5).max(300).default(30),
+  duration_per_question: z.coerce.number().min(5, 'Durasi default minimal 5 detik').max(300, 'Durasi default maksimal 300 detik').default(30),
   random_questions: z.boolean().default(false),
   random_options: z.boolean().default(false),
   thumbnail_url: z.string().nullable().optional(),
@@ -473,6 +485,44 @@ export const QuizEditor: React.FC = () => {
     }
   };
 
+  const onInvalid = (formErrors: any) => {
+    console.warn('Form validation failed:', formErrors);
+    if (formErrors.title) {
+      setMessage({ type: 'error', text: formErrors.title.message || 'Judul kuis minimal harus 3 karakter' });
+      return;
+    }
+    if (formErrors.duration_per_question) {
+      setMessage({ type: 'error', text: formErrors.duration_per_question.message || 'Durasi per soal harus antara 5-300 detik' });
+      return;
+    }
+    if (formErrors.questions) {
+      const qErrors = formErrors.questions;
+      const count = watchedQuestions?.length || 0;
+      for (let i = 0; i < count; i++) {
+        if (qErrors[i]) {
+          setActiveQuestionIndex(i);
+          if (qErrors[i].question_text) {
+            setMessage({ type: 'error', text: `Soal #${i + 1}: ${qErrors[i].question_text.message || 'Pertanyaan minimal 3 karakter'}` });
+            return;
+          }
+          if (qErrors[i].duration) {
+            setMessage({ type: 'error', text: `Soal #${i + 1}: ${qErrors[i].duration.message || 'Durasi soal minimal 5 detik'}` });
+            return;
+          }
+          if (qErrors[i].points) {
+            setMessage({ type: 'error', text: `Soal #${i + 1}: ${qErrors[i].points.message || 'Poin soal minimal 10'}` });
+            return;
+          }
+          if (qErrors[i].options) {
+            setMessage({ type: 'error', text: `Soal #${i + 1}: Pilihan jawaban tidak boleh kosong (minimal 2 opsi terisi).` });
+            return;
+          }
+        }
+      }
+    }
+    setMessage({ type: 'error', text: 'Terdapat isian formulir yang belum lengkap atau tidak valid.' });
+  };
+
   const onSubmit = async (values: QuizFormValues) => {
     // Validate that every question has at least one correct option (except for matching questions)
     for (let i = 0; i < values.questions.length; i++) {
@@ -581,10 +631,10 @@ export const QuizEditor: React.FC = () => {
     // Online API Flow
     try {
       const userRes = await AuthService.getSession();
-      const user = userRes.data?.session?.user;
-      if (!user) throw new Error('Unauthorized');
+      const user = userRes.data?.session?.user || userRes.data?.user || useAuthStore.getState().user || useAuthStore.getState().profile;
+      if (!user?.id) throw new Error('Sesi autentikasi telah berakhir. Silakan login kembali.');
 
-      const id = quizId || crypto.randomUUID();
+      const id = quizId || generateUUID();
       const newQuiz = {
         id,
         teacher_id: user.id,
@@ -595,12 +645,12 @@ export const QuizEditor: React.FC = () => {
         opening_text: values.opening_text || null,
         closing_text: values.closing_text || null,
         pin_code: pin,
-        duration_per_question: values.duration_per_question,
-        random_questions: values.random_questions,
-        random_options: values.random_options,
+        duration_per_question: Number(values.duration_per_question) || 30,
+        random_questions: !!values.random_questions,
+        random_options: !!values.random_options,
         thumbnail_url: values.thumbnail_url || null,
         quiz_mode: values.quiz_mode,
-        lives_count: values.lives_count,
+        lives_count: Number(values.lives_count) || 3,
         show_final_result: values.show_final_result,
         show_leaderboard: values.show_leaderboard,
         show_correct_answer: values.show_correct_answer,
@@ -611,10 +661,9 @@ export const QuizEditor: React.FC = () => {
         show_question_statistics: values.show_question_statistics,
         anti_cheat_enabled: values.anti_cheat_enabled,
         fullscreen_required: values.fullscreen_required,
-        auto_submit_on_violation: values.auto_submit_on_violation,
+        auto_submit_on_violation: Number(values.auto_submit_on_violation) || 3,
       };
 
-      let quizUpsertError = null;
       if (quizId) {
         // Update quiz details
         const updateRes = await QuizService.updateQuiz(quizId, {
@@ -624,12 +673,12 @@ export const QuizEditor: React.FC = () => {
           description: values.description || null,
           opening_text: values.opening_text || null,
           closing_text: values.closing_text || null,
-          duration_per_question: values.duration_per_question,
-          random_questions: values.random_questions,
-          random_options: values.random_options,
+          duration_per_question: Number(values.duration_per_question) || 30,
+          random_questions: !!values.random_questions,
+          random_options: !!values.random_options,
           thumbnail_url: values.thumbnail_url || null,
           quiz_mode: values.quiz_mode,
-          lives_count: values.lives_count,
+          lives_count: Number(values.lives_count) || 3,
           show_final_result: values.show_final_result,
           show_leaderboard: values.show_leaderboard,
           show_correct_answer: values.show_correct_answer,
@@ -640,20 +689,25 @@ export const QuizEditor: React.FC = () => {
           show_question_statistics: values.show_question_statistics,
           anti_cheat_enabled: values.anti_cheat_enabled,
           fullscreen_required: values.fullscreen_required,
-          auto_submit_on_violation: values.auto_submit_on_violation,
+          auto_submit_on_violation: Number(values.auto_submit_on_violation) || 3,
         });
-        quizUpsertError = updateRes.error;
+        if (!updateRes.success) {
+          throw updateRes.error || new Error('Gagal memperbarui data kuis.');
+        }
       } else {
         // Insert new quiz details
         const createRes = await QuizService.createQuiz(newQuiz);
-        quizUpsertError = createRes.error;
+        if (!createRes.success) {
+          throw createRes.error || new Error('Gagal membuat kuis baru.');
+        }
       }
-
-      if (quizUpsertError) throw quizUpsertError;
 
       // Delete existing questions for updates to handle modifications
       if (quizId) {
-        await QuestionService.deleteQuestionsByQuizId(quizId);
+        const delRes = await QuestionService.deleteQuestionsByQuizId(quizId);
+        if (!delRes.success) {
+          throw delRes.error || new Error('Gagal memperbarui daftar soal lama.');
+        }
       }
 
       // Add/Re-add questions and options
@@ -664,28 +718,34 @@ export const QuizEditor: React.FC = () => {
           quiz_id: id,
           question_text: q.question_text,
           question_type: q.question_type || 'multiple_choice',
-          media_type: q.media_type,
+          media_type: q.media_type || 'text',
           media_url: q.media_url || null,
-          points: q.points,
-          duration: q.duration || (q as any).timer || values.duration_per_question || 30,
+          points: Number(q.points) || 100,
+          duration: Number(q.duration) || Number((q as any).timer) || Number(values.duration_per_question) || 30,
           explanation: q.explanation || null,
           order_index: i
         });
 
-        if (!qRes.success || !qRes.data) throw qRes.error || new Error('Gagal menyimpan soal');
+        if (!qRes.success || !qRes.data) {
+          const errDetail = typeof qRes.error === 'string' ? qRes.error : (qRes.error as any)?.message || 'Gagal menyimpan soal';
+          throw new Error(`Soal #${i + 1}: ${errDetail}`);
+        }
         const insertedQuestion = qRes.data;
 
         // Insert options
         const optionRows = q.options.map(o => ({
           question_id: insertedQuestion.id,
           option_text: o.option_text,
-          is_correct: o.is_correct,
+          is_correct: !!o.is_correct,
           match_text: o.match_text || null
         }));
 
         const optsRes = await QuestionService.createOptions(optionRows);
 
-        if (!optsRes.success) throw optsRes.error;
+        if (!optsRes.success) {
+          const errDetail = typeof optsRes.error === 'string' ? optsRes.error : (optsRes.error as any)?.message || 'Gagal menyimpan pilihan jawaban';
+          throw new Error(`Pilihan Jawaban Soal #${i + 1}: ${errDetail}`);
+        }
       }
 
       setMessage({ type: 'success', text: 'Kuis berhasil disimpan!' });
@@ -694,7 +754,9 @@ export const QuizEditor: React.FC = () => {
 
     } catch (err: any) {
       console.error('Submit error:', err);
-      setMessage({ type: 'error', text: err.message || 'Terjadi kesalahan saat menyimpan kuis.' });
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Terjadi kesalahan saat menyimpan kuis.');
+      setMessage({ type: 'error', text: errorMsg });
+      showError('Gagal Menyimpan', errorMsg);
     } finally {
       setLoading(false);
     }
@@ -727,14 +789,19 @@ export const QuizEditor: React.FC = () => {
   };
 
   const handleAddOption = (qIndex: number) => {
-    const currentOptions = watchedQuestions[qIndex].options;
+    const currentOptions = watchedQuestions[qIndex]?.options || [];
     if (currentOptions.length >= 4) {
       showError('Peringatan', 'Maksimal 4 pilihan jawaban.');
       return;
     }
+    const currentType = watchedQuestions[qIndex]?.question_type || 'multiple_choice';
     setValue(`questions.${qIndex}.options`, [
       ...currentOptions,
-      { option_text: '', is_correct: false }
+      { 
+        option_text: '', 
+        is_correct: false, 
+        match_text: currentType === 'matching' ? '' : null 
+      }
     ]);
   };
 
@@ -856,7 +923,8 @@ export const QuizEditor: React.FC = () => {
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <button
-              onClick={handleSubmit(onSubmit)}
+              type="button"
+              onClick={handleSubmit(onSubmit, onInvalid)}
               disabled={loading}
               className="flex items-center gap-2 rounded-2xl bg-primary text-primary-foreground px-5 py-3 font-bold text-sm shadow hover:bg-primary/95 disabled:opacity-50 transition"
             >
@@ -875,7 +943,7 @@ export const QuizEditor: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <form onSubmit={handleSubmit(onSubmit, onInvalid)} className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
           {/* Main Quiz Metadata Sidebar */}
           <div className="lg:col-span-1 space-y-6">
@@ -1489,6 +1557,23 @@ export const QuizEditor: React.FC = () => {
                         poin
                       </span>
                     </div>
+                    {/* Presets badges */}
+                    <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
+                      {[100, 200, 500, 1000].map(pVal => (
+                        <button
+                          key={pVal}
+                          type="button"
+                          onClick={() => setValue(`questions.${activeQuestionIndex}.points`, pVal)}
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition ${
+                            Number(currentWatchedQuestion?.points) === pVal
+                              ? 'border-primary bg-primary/10 text-primary'
+                              : 'border-border bg-background text-muted-foreground hover:bg-muted'
+                          }`}
+                        >
+                          {pVal} Poin
+                        </button>
+                      ))}
+                    </div>
                     {(errors.questions as any)?.[activeQuestionIndex]?.points && (
                       <p className="text-xs text-destructive mt-1 font-medium">
                         {(errors.questions as any)[activeQuestionIndex]?.points?.message}
@@ -1525,130 +1610,94 @@ export const QuizEditor: React.FC = () => {
                 </div>
 
                 {/* Media Type Selector */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1 block">Tipe Soal / Media</label>
-                    <div className="grid grid-cols-5 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (currentWatchedQuestion?.media_type !== 'text') {
-                            setValue(`questions.${activeQuestionIndex}.media_type`, 'text');
-                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
-                          currentWatchedQuestion?.media_type === 'text'
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Type className="h-4 w-4 mb-1" />
-                        Teks
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (currentWatchedQuestion?.media_type !== 'image') {
-                            setValue(`questions.${activeQuestionIndex}.media_type`, 'image');
-                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
-                          currentWatchedQuestion?.media_type === 'image'
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Image className="h-4 w-4 mb-1" />
-                        Gambar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (currentWatchedQuestion?.media_type !== 'audio') {
-                            setValue(`questions.${activeQuestionIndex}.media_type`, 'audio');
-                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
-                          currentWatchedQuestion?.media_type === 'audio'
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Volume2 className="h-4 w-4 mb-1" />
-                        Audio
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (currentWatchedQuestion?.media_type !== 'video') {
-                            setValue(`questions.${activeQuestionIndex}.media_type`, 'video');
-                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
-                          currentWatchedQuestion?.media_type === 'video'
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Video className="h-4 w-4 mb-1" />
-                        Video
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (currentWatchedQuestion?.media_type !== 'latex') {
-                            setValue(`questions.${activeQuestionIndex}.media_type`, 'latex');
-                            setValue(`questions.${activeQuestionIndex}.media_url`, '');
-                          }
-                        }}
-                        className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
-                          currentWatchedQuestion?.media_type === 'latex'
-                            ? 'border-primary bg-primary/10 text-primary'
-                            : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
-                        }`}
-                      >
-                        <Sigma className="h-4 w-4 mb-1" />
-                        Math
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1 block">Bobot Poin Soal</label>
-                    <input
-                      type="number"
-                      min={10}
-                      max={10000}
-                      {...register(`questions.${activeQuestionIndex}.points`)}
-                      className="w-full rounded-2xl border border-border bg-background/50 px-3.5 py-3 text-sm outline-none focus:border-primary font-semibold"
-                      placeholder="Contoh: 100"
-                    />
-                    {/* Presets badges */}
-                    <div className="flex gap-1.5 mt-2 overflow-x-auto pb-1">
-                      {[100, 200, 500, 1000].map(pVal => (
-                        <button
-                          key={pVal}
-                          type="button"
-                          onClick={() => setValue(`questions.${activeQuestionIndex}.points`, pVal)}
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition ${
-                            Number(currentWatchedQuestion?.points) === pVal
-                              ? 'border-primary bg-primary/10 text-primary'
-                              : 'border-border bg-background text-muted-foreground hover:bg-muted'
-                          }`}
-                        >
-                          {pVal} Poin
-                        </button>
-                      ))}
-                    </div>
-                    {(errors.questions as any)?.[activeQuestionIndex]?.points && (
-                      <p className="text-xs text-destructive mt-1 font-medium">
-                        {(errors.questions as any)[activeQuestionIndex]?.points?.message}
-                      </p>
-                    )}
+                <div>
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase mb-1.5 block">Tipe Media Pendukung</label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentWatchedQuestion?.media_type !== 'text') {
+                          setValue(`questions.${activeQuestionIndex}.media_type`, 'text');
+                          setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                        (currentWatchedQuestion?.media_type || 'text') === 'text'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Type className="h-4 w-4 mb-1" />
+                      Teks
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentWatchedQuestion?.media_type !== 'image') {
+                          setValue(`questions.${activeQuestionIndex}.media_type`, 'image');
+                          setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                        currentWatchedQuestion?.media_type === 'image'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Image className="h-4 w-4 mb-1" />
+                      Gambar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentWatchedQuestion?.media_type !== 'audio') {
+                          setValue(`questions.${activeQuestionIndex}.media_type`, 'audio');
+                          setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                        currentWatchedQuestion?.media_type === 'audio'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Volume2 className="h-4 w-4 mb-1" />
+                      Audio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentWatchedQuestion?.media_type !== 'video') {
+                          setValue(`questions.${activeQuestionIndex}.media_type`, 'video');
+                          setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                        currentWatchedQuestion?.media_type === 'video'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Video className="h-4 w-4 mb-1" />
+                      Video
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentWatchedQuestion?.media_type !== 'latex') {
+                          setValue(`questions.${activeQuestionIndex}.media_type`, 'latex');
+                          setValue(`questions.${activeQuestionIndex}.media_url`, '');
+                        }
+                      }}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-2xl border text-[10px] font-bold transition ${
+                        currentWatchedQuestion?.media_type === 'latex'
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border bg-background/30 text-muted-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Sigma className="h-4 w-4 mb-1" />
+                      Math
+                    </button>
                   </div>
                 </div>
 
@@ -1852,30 +1901,42 @@ export const QuizEditor: React.FC = () => {
                           )}
                           
                           {isMatching ? (
-                            <div className="flex-1 flex items-center gap-2">
-                              <input
-                                type="text"
-                                placeholder={`Item Kiri ${optIdx + 1}`}
-                                {...register(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)}
-                                className="w-1/2 bg-background/50 rounded-xl px-3 py-2 text-xs font-semibold outline-none border border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
-                              />
-                              <span className="text-muted-foreground text-xs font-bold">🔗</span>
-                              <input
-                                type="text"
-                                placeholder={`Pasangan Kanan ${optIdx + 1}`}
-                                {...register(`questions.${activeQuestionIndex}.options.${optIdx}.match_text`)}
-                                className="w-1/2 bg-background/50 rounded-xl px-3 py-2 text-xs font-semibold outline-none border border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
-                              />
+                            <div className="flex-1 flex flex-col gap-1">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  placeholder={`Item Kiri ${optIdx + 1}`}
+                                  {...register(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)}
+                                  className="w-1/2 bg-background/50 rounded-xl px-3 py-2 text-xs font-semibold outline-none border border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
+                                />
+                                <span className="text-muted-foreground text-xs font-bold">🔗</span>
+                                <input
+                                  type="text"
+                                  placeholder={`Pasangan Kanan ${optIdx + 1}`}
+                                  {...register(`questions.${activeQuestionIndex}.options.${optIdx}.match_text`)}
+                                  className="w-1/2 bg-background/50 rounded-xl px-3 py-2 text-xs font-semibold outline-none border border-border focus:border-primary text-foreground placeholder:text-muted-foreground"
+                                />
+                              </div>
+                              {((errors.questions as any)?.[activeQuestionIndex]?.options?.[optIdx]?.option_text || (errors.questions as any)?.[activeQuestionIndex]?.options?.[optIdx]?.match_text) && (
+                                <p className="text-xs text-destructive font-medium">
+                                  {(errors.questions as any)[activeQuestionIndex]?.options?.[optIdx]?.option_text?.message || (errors.questions as any)[activeQuestionIndex]?.options?.[optIdx]?.match_text?.message || 'Pasangan item tidak boleh kosong'}
+                                </p>
+                              )}
                             </div>
                           ) : (
                             <div className="flex-1 min-w-0">
                               <input
                                 type="text"
-                                disabled={isTrueFalse}
+                                readOnly={isTrueFalse}
                                 placeholder={`Jawaban Pilihan ${String.fromCharCode(65 + optIdx)}`}
                                 {...register(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)}
-                                className="w-full bg-transparent text-sm font-semibold outline-none border-none text-foreground placeholder:text-muted-foreground disabled:opacity-85"
+                                className="w-full bg-transparent text-sm font-semibold outline-none border-none text-foreground placeholder:text-muted-foreground read-only:opacity-85"
                               />
+                              {(errors.questions as any)?.[activeQuestionIndex]?.options?.[optIdx]?.option_text && (
+                                <p className="text-xs text-destructive mt-1 font-medium">
+                                  {(errors.questions as any)[activeQuestionIndex]?.options?.[optIdx]?.option_text?.message}
+                                </p>
+                              )}
                               {watch(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`) && hasLatex(watch(`questions.${activeQuestionIndex}.options.${optIdx}.option_text`)) && (
                                 <div className="mt-1 pt-1 border-t border-border/40 text-xs flex items-center gap-1.5 text-primary">
                                   <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">Preview:</span>
